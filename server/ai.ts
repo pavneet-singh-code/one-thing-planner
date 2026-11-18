@@ -13,7 +13,7 @@ const model = () => process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
 async function askJson<T>(prompt: string, schema: object): Promise<T> {
   if (!aiEnabled()) throw new AiError('AI is off: set GEMINI_API_KEY on the server.', 503);
-  client ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY!, apiVersion: 'v1beta' }) // JSON mode needs v1beta;
+  client ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY!, apiVersion: 'v1beta' }); // JSON mode needs v1beta
   let text: string | undefined;
   for (let attempt = 1; ; attempt++) {
     try {
