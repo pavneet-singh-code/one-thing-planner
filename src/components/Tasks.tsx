@@ -6,7 +6,7 @@ import { kindLabel } from '../kinds';
 import { getName, TODAY_LIMIT, toast, type Store } from '../store';
 import { subjectClass } from '../subjects';
 import { FocusTimer } from './FocusTimer';
-import { HeroArt } from './Hero';
+import { HeroArt, Sprig } from './Hero';
 import { Icon } from './Icon';
 import { useEditor } from './TaskEditor';
 
@@ -142,6 +142,7 @@ export function Greeting({ store }: { store: Store }) {
 
   return (
     <section className="card greet">
+      <Sprig />
       <h1>{greeting()}{name ? `, ${name}` : ''} <span aria-hidden="true">👋</span></h1>
       <p className="muted" style={{ margin: 0 }}>
         {left === 0 ? 'Nothing lined up for today yet.' : left === 1 ? 'One thing on today’s list. You’ve got this.' : `${left} things on today’s list. Start with the first.`}

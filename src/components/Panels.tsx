@@ -3,6 +3,7 @@ import { api, getKey, setKey } from '../api';
 import { addDays, today } from '../dates';
 import { currentSubscription, disablePush, enablePush, pushSupported } from '../push';
 import { getName, setName, toast, type Store } from '../store';
+import { getTheme, setTheme, type Theme } from '../theme';
 import { Icon } from './Icon';
 import { keepers, ProposalList, type Proposal } from './Proposal';
 
@@ -139,6 +140,7 @@ export function SettingsPanel({ store }: { store: Store }) {
   return (
     <div className="page settings">
       <NameCard />
+      <ThemeCard />
       <div className="card">
         <h2><Icon name="bell" /> Notifications</h2>
         {!s?.push ? <p className="note">Push is off on the server. Add the VAPID keys to the environment variables (see README).</p>
@@ -163,6 +165,21 @@ export function SettingsPanel({ store }: { store: Store }) {
         <h2>Access key</h2>
         <p className="muted small" style={{ margin: 0 }}>This device is unlocked with your access key. Lock it to remove the key from this device.</p>
         <div className="actions"><button className="soft" onClick={() => { setKey(''); location.reload(); }} disabled={!getKey()}>Lock this device</button></div>
+      </div>
+    </div>
+  );
+}
+
+function ThemeCard() {
+  const [t, setT] = useState<Theme>(getTheme());
+  const pick = (x: Theme) => { setT(x); setTheme(x); };
+  return (
+    <div className="card">
+      <h2>Theme</h2>
+      <div className="seg">
+        <button type="button" className={t === 'light' ? 'on' : ''} onClick={() => pick('light')}>☀️ Light</button>
+        <button type="button" className={t === 'dark' ? 'on' : ''} onClick={() => pick('dark')}>🌙 Dark</button>
+        <button type="button" className={t === 'auto' ? 'on' : ''} onClick={() => pick('auto')}>Match phone</button>
       </div>
     </div>
   );
