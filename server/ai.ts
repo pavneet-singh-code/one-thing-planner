@@ -48,7 +48,34 @@ async function askJson<T>(prompt: string | Part[], schema: object): Promise<T> {
 
 const COACH = 'You are a study coach for a student who tends to start too many things and finish none. Keep everything concrete and small.';
 
-export interface PlannedTask { title: string; date: string; minutes: number }
+export interface PlannedTask { title: string; date: string; minutes: number; kind?: string }
+
+const KIND_RULE = '"kind" is "study" for normal study work. Use "exam", "placement" or "deadline" only for the actual exam, placement test/interview or submission itself (not for preparing for it).';
+const TASKS_SCHEMA = {
+  type: 'array',
+  items: {
+    type: 'object',
+    properties: {
+      title: { type: 'string' },
+      date: { type: 'string', description: 'YYYY-MM-DD' },
+      minutes: { type: 'integer' },
+      kind: { type: 'string', enum: ['study', 'exam', 'placement', 'deadline'] },
+    },
+    required: ['title', 'date', 'minutes'],
+  },
+};
+const KINDS = new Set(['study', 'exam', 'placement', 'deadline']);
+function normTasks(raw: PlannedTask[] | undefined, max: number) {
+  return (raw ?? [])
+    .filter((t) => t && typeof t.title === 'string' && t.title.trim())
+    .slice(0, max)
+    .map((t) => ({
+      title: t.title.trim().slice(0, 140),
+      date: /^\d{4}-\d{2}-\d{2}$/.test(t.date) ? t.date : '',
+      minutes: clampInt(t.minutes, 5, 240, 30),
+      kind: KINDS.has(t.kind ?? '') ? t.kind! : 'study',
+    }));
+}
 export async function planGoal(p: { goal: string; deadline: string; hoursPerDay: number; today: string }) {
   const prompt = `${COACH}
 Today is ${p.today}. Deadline: ${p.deadline}. Available: about ${p.hoursPerDay} hours per day.
@@ -57,30 +84,17 @@ Break the goal into study tasks:
 - Each task is doable in one sitting (15-90 minutes), starts with a verb, and says exactly what to do (which chapter, how many problems, etc.). Under 90 characters.
 - Spread tasks from today to the day before the deadline; never more than ${p.hoursPerDay} hours on one day.
 - Include at least one review or practice-test task near the end. At most 14 tasks.
+- ${KIND_RULE}
 - "summary" is one sentence on the strategy.`;
   const r = await askJson<{ summary?: string; tasks?: PlannedTask[] }>(prompt, {
     type: 'object',
     properties: {
       summary: { type: 'string' },
-      tasks: {
-        type: 'array',
-        items: {
-          type: 'object',
-          properties: { title: { type: 'string' }, date: { type: 'string', description: 'YYYY-MM-DD' }, minutes: { type: 'integer' } },
-          required: ['title', 'date', 'minutes'],
-        },
-      },
+      tasks: TASKS_SCHEMA,
     },
     required: ['summary', 'tasks'],
   });
-  const tasks = (r.tasks ?? [])
-    .filter((t) => t && typeof t.title === 'string' && t.title.trim())
-    .slice(0, 20)
-    .map((t) => ({
-      title: t.title.trim().slice(0, 140),
-      date: /^\d{4}-\d{2}-\d{2}$/.test(t.date) ? t.date : '',
-      minutes: clampInt(t.minutes, 5, 240, 30),
-    }));
+  const tasks = normTasks(r.tasks, 20);
   if (!tasks.length) throw new AiError('Gemini did not suggest any tasks. Try describing the goal in more detail.');
   return { summary: String(r.summary ?? ''), tasks };
 }
@@ -98,7 +112,7 @@ ${p.pdf ? 'The attached PDF is the syllabus.' : `Syllabus text (between the mark
 ${p.text}
 >>>`}
 1. "topics": list the syllabus topics in order, as short names (under 60 characters each, at most 40). Merge tiny sub-points into their topic.
-${p.plan ? `2. "tasks": a study plan from today to the day before ${end}. Each task is doable in one sitting (15-90 minutes), starts with a verb, names the topic and says exactly what to do. Under 90 characters. Never more than ${p.hoursPerDay} hours on one day. Leave room for revision of earlier topics and at least one full practice test near the end. At most 40 tasks.
+${p.plan ? `2. "tasks": a study plan from today to the day before ${end}. Each task is doable in one sitting (15-90 minutes), starts with a verb, names the topic and says exactly what to do. Under 90 characters. Never more than ${p.hoursPerDay} hours on one day. Leave room for revision of earlier topics and at least one full practice test near the end. At most 40 tasks. ${KIND_RULE}
 3. "summary": one sentence on the strategy.` : '2. "tasks": an empty list. "summary": one sentence describing the syllabus.'}`;
   const parts: Part[] = p.pdf ? [{ inlineData: { mimeType: 'application/pdf', data: p.pdf } }, { text: prompt }] : [{ text: prompt }];
   const r = await askJson<{ topics?: string[]; summary?: string; tasks?: PlannedTask[] }>(parts, {
@@ -106,28 +120,40 @@ ${p.plan ? `2. "tasks": a study plan from today to the day before ${end}. Each t
     properties: {
       topics: { type: 'array', items: { type: 'string' } },
       summary: { type: 'string' },
-      tasks: {
-        type: 'array',
-        items: {
-          type: 'object',
-          properties: { title: { type: 'string' }, date: { type: 'string', description: 'YYYY-MM-DD' }, minutes: { type: 'integer' } },
-          required: ['title', 'date', 'minutes'],
-        },
-      },
+      tasks: TASKS_SCHEMA,
     },
     required: ['topics', 'summary', 'tasks'],
   });
   const topics = (r.topics ?? []).map(String).map((s) => s.trim().slice(0, 160)).filter(Boolean).slice(0, 80);
   if (!topics.length) throw new AiError('Gemini could not find any topics in that syllabus. Is the PDF a scan? Try pasting the text instead.');
-  const tasks = (r.tasks ?? [])
-    .filter((t) => t && typeof t.title === 'string' && t.title.trim())
-    .slice(0, 50)
-    .map((t) => ({
-      title: t.title.trim().slice(0, 140),
-      date: /^\d{4}-\d{2}-\d{2}$/.test(t.date) ? t.date : '',
-      minutes: clampInt(t.minutes, 5, 240, 30),
-    }));
+  const tasks = normTasks(r.tasks, 50);
   return { topics, summary: String(r.summary ?? ''), tasks };
+}
+
+/** Revise an existing plan from a follow-up request ("lighter weekends", "more mock tests"...). */
+export async function refinePlan(p: {
+  instruction: string; tasks: PlannedTask[]; today: string; deadline: string | null; hoursPerDay: number | null; context: string; history: string[];
+}) {
+  const prompt = `${COACH}
+Today is ${p.today}.${p.deadline ? ` Deadline: ${p.deadline}.` : ''}${p.hoursPerDay ? ` Available: about ${p.hoursPerDay} hours per day.` : ''}
+${p.context ? `What this plan is for (between the markers):\n<<<\n${p.context}\n>>>` : ''}
+${p.history.length ? `Requests already applied earlier: ${p.history.map((h) => JSON.stringify(h)).join('; ')}.` : ''}
+Current plan (JSON): ${JSON.stringify(p.tasks)}
+The student now asks (between the markers):
+<<<
+${p.instruction}
+>>>
+Return the complete revised plan with this request applied. Keep every task the request does not affect exactly as it is (same title, date, minutes and kind).
+Rules unless the student asks otherwise: each task fits one sitting (15-90 minutes), starts with a verb, is under 90 characters, dates are YYYY-MM-DD from today onwards. At most 50 tasks. ${KIND_RULE}
+"summary" is one short sentence saying what you changed.`;
+  const r = await askJson<{ summary?: string; tasks?: PlannedTask[] }>(prompt, {
+    type: 'object',
+    properties: { summary: { type: 'string' }, tasks: TASKS_SCHEMA },
+    required: ['summary', 'tasks'],
+  });
+  const tasks = normTasks(r.tasks, 50);
+  if (!tasks.length) throw new AiError('Gemini returned an empty plan. Try rephrasing your request.');
+  return { summary: String(r.summary ?? ''), tasks };
 }
 
 function addDaysIso(s: string, n: number) {

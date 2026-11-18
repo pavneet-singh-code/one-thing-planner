@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react';
-import { api, getKey, setKey } from '../api';
+import { useEffect, useRef, useState } from 'react';
+import { api, getKey, setKey, type Task } from '../api';
 import { addDays, today } from '../dates';
 import { currentSubscription, disablePush, enablePush, pushSupported } from '../push';
 import { getName, setName, toast, type Store } from '../store';
 import { getTheme, setTheme, type Theme } from '../theme';
 import { Icon } from './Icon';
-import { keepers, ProposalList, type Proposal } from './Proposal';
+import { checkLinks, fromAi, fromTask, keepers, PlanReview, toFields, type Plan } from './Proposal';
 
 /* ---------- AI ---------- */
 
@@ -14,9 +14,14 @@ export function AiPanel({ store }: { store: Store }) {
   const [deadline, setDeadline] = useState(addDays(today(), 7));
   const [hours, setHours] = useState(2);
   const [subject, setSubject] = useState('');
-  const [plan, setPlan] = useState<{ summary: string; tasks: Proposal[] } | null>(null);
-  const [remind, setRemind] = useState(true);
+  const [plan, setPlan] = useState<Plan | null>(null);
   const [busyGoal, setBusyGoal] = useState(false);
+  const [justAdded, setJustAdded] = useState<{ n: number; subject: string } | null>(null);
+
+  const [adjSubject, setAdjSubject] = useState('');
+  const [adj, setAdj] = useState<Plan | null>(null);
+  const [adjOriginal, setAdjOriginal] = useState<Task[]>([]);
+  const adjRef = useRef<HTMLDivElement>(null);
 
   const [dayHours, setDayHours] = useState(3);
   const [dayPlan, setDayPlan] = useState<{ pick: { id: string; why: string }[]; advice: string } | null>(null);
@@ -26,24 +31,53 @@ export function AiPanel({ store }: { store: Store }) {
     <div className="page"><div className="card"><p className="note">AI is off. Add GEMINI_API_KEY to the server’s environment variables to turn it on.</p></div></div>
   );
 
+  const subjects = [...new Set([...store.subjects.map((s) => s.name), ...store.tasks.map((t) => t.subject)].filter(Boolean))].sort();
+
   const makePlan = async () => {
     if (!goal.trim()) return;
-    setBusyGoal(true); setPlan(null);
+    setBusyGoal(true); setPlan(null); setJustAdded(null);
     try {
       const r = await api.planGoal({ goal, deadline, hoursPerDay: hours, today: today() });
-      setPlan({ summary: r.summary, tasks: r.tasks.map((t) => ({ ...t, keep: true })) });
+      setPlan({ summary: r.summary, tasks: fromAi(r.tasks, { subject: subject.trim(), time: '17:00' }) });
     } catch (e) { toast((e as Error).message); }
     finally { setBusyGoal(false); }
   };
   const kept = plan ? keepers(plan.tasks) : [];
   const acceptPlan = async () => {
-    if (!plan) return;
-    await store.actions.add(kept.map((t) => ({
-      title: t.title.trim(), subject: subject.trim(), due: t.date || null, est: t.minutes,
-      remindAt: remind && t.date ? new Date(t.date + 'T17:00').toISOString() : null,
-    })));
+    if (!plan || !checkLinks(plan.tasks)) return;
+    await store.actions.add(kept.map(toFields));
+    setJustAdded({ n: kept.length, subject: kept.find((t) => t.subject)?.subject ?? '' });
     setPlan(null); setGoal('');
-    toast(`Added ${kept.length} tasks to Later.`);
+    toast(`Added ${kept.length} tasks.`);
+  };
+
+  /* adjust tasks that already exist */
+  const loadAdjust = (subj: string) => {
+    const td = today();
+    const list = store.tasks
+      .filter((t) => t.status !== 'done' && (!subj || t.subject === subj) && (!t.due || t.due >= td))
+      .sort((a, b) => (a.due ?? '9999').localeCompare(b.due ?? '9999'))
+      .slice(0, 50);
+    if (!list.length) { toast(subj ? `No open upcoming tasks for ${subj}.` : 'No open upcoming tasks.'); return; }
+    setAdjSubject(subj);
+    setAdjOriginal(list);
+    setAdj({ summary: '', tasks: list.map(fromTask) });
+    setTimeout(() => adjRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+  };
+  const adjKept = adj ? keepers(adj.tasks) : [];
+  const adjKeptIds = new Set(adjKept.map((p) => p.srcId).filter(Boolean));
+  const adjRemoved = adjOriginal.filter((t) => !adjKeptIds.has(t.id));
+  const adjNew = adjKept.filter((p) => !p.srcId);
+  const saveAdjust = async () => {
+    if (!adj || !checkLinks(adj.tasks)) return;
+    for (const t of adjRemoved) store.actions.remove(t);
+    for (const p of adjKept) {
+      const t = p.srcId && store.tasks.find((x) => x.id === p.srcId);
+      if (t) store.actions.edit(t, toFields(p));
+    }
+    if (adjNew.length) await store.actions.add(adjNew.map(toFields));
+    toast(`Saved: ${adjKept.length - adjNew.length} updated, ${adjNew.length} added, ${adjRemoved.length} removed.`);
+    setAdj(null); setAdjOriginal([]);
   };
 
   const planDay = async () => {
@@ -59,7 +93,7 @@ export function AiPanel({ store }: { store: Store }) {
       <div className="card">
         <div>
           <h2><Icon name="sparkle" /> Break a big goal into tasks</h2>
-          <p className="muted small" style={{ margin: '4px 0 0' }}>Describe the goal and the deadline. The AI proposes small tasks spread across the days. Edit, remove or add tasks before you keep them.</p>
+          <p className="muted small" style={{ margin: '4px 0 0' }}>Describe the goal and the deadline. The AI proposes tasks; you can edit every detail, then keep asking it to change things until the plan is right.</p>
         </div>
         <div className="grid">
           <label className="f full">Goal
@@ -68,19 +102,51 @@ export function AiPanel({ store }: { store: Store }) {
           </label>
           <label className="f">Deadline<input type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} /></label>
           <label className="f">Hours / day<input type="number" min={0.5} max={12} step={0.5} value={hours} onChange={(e) => setHours(Number(e.target.value) || 2)} /></label>
-          <label className="f wide">Subject<input maxLength={40} list="subjList" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="NALR" /></label>
+          <label className="f wide">Subject<input maxLength={40} list="aiSubj" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="NALR" /></label>
+          <datalist id="aiSubj">{subjects.map((s) => <option key={s} value={s} />)}</datalist>
         </div>
-        <div className="actions"><button className="primary" disabled={busyGoal || !goal.trim()} onClick={makePlan}>{busyGoal ? 'Planning…' : 'Make a plan'}</button></div>
+        <div className="actions"><button className="primary" disabled={busyGoal || !goal.trim()} onClick={makePlan}>{busyGoal ? 'Planning…' : plan ? 'Start over' : 'Make a plan'}</button></div>
         {plan && (
-          <div className="proposal">
-            {plan.summary && <p className="why" style={{ margin: 0 }}>{plan.summary}</p>}
-            <ProposalList tasks={plan.tasks} onChange={(tasks) => setPlan({ ...plan, tasks })} />
-            <label className="check-line"><input type="checkbox" checked={remind} onChange={(e) => setRemind(e.target.checked)} /> Remind me at 5:00 pm on each task’s day</label>
-            <div className="actions">
+          <>
+            <PlanReview plan={plan} setPlan={setPlan} store={store} context={{ text: `${subject ? `Subject: ${subject}. ` : ''}${goal}`, deadline, hoursPerDay: hours }} />
+            <div className="actions sticky-actions">
               <button className="primary" disabled={!kept.length} onClick={acceptPlan}>Add {kept.length} tasks</button>
               <button className="soft" onClick={() => setPlan(null)}>Discard</button>
             </div>
+          </>
+        )}
+        {justAdded && (
+          <div className="note-box">
+            <span>Added {justAdded.n} tasks. Want to change how they’re spread out?</span>
+            <button className="soft sm" onClick={() => { loadAdjust(justAdded.subject); setJustAdded(null); }}><Icon name="sparkle" size={14} /> Adjust them with AI</button>
           </div>
+        )}
+      </div>
+
+      <div className="card" ref={adjRef}>
+        <div>
+          <h2><Icon name="edit" /> Adjust my tasks with AI</h2>
+          <p className="muted small" style={{ margin: '4px 0 0' }}>Load your upcoming tasks, then ask for changes like “move everything off Sunday”, “add revision before the exam” or “I fell behind, re-plan the rest”. Nothing changes until you save.</p>
+        </div>
+        <div className="inline-form">
+          <label className="f">Which tasks
+            <select value={adjSubject} onChange={(e) => setAdjSubject(e.target.value)}>
+              <option value="">All subjects</option>
+              {subjects.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </label>
+          <button className="soft" onClick={() => loadAdjust(adjSubject)}>{adj ? 'Reload' : 'Load tasks'}</button>
+        </div>
+        {adj && (
+          <>
+            <PlanReview plan={adj} setPlan={setAdj} store={store}
+              context={{ text: `Re-planning the student's existing ${adjSubject || 'upcoming'} tasks.`, deadline: store.subjects.find((s) => s.name === adjSubject)?.examDate ?? null }} />
+            <div className="actions sticky-actions">
+              <button className="primary" onClick={saveAdjust}>Save changes</button>
+              <span className="muted small">{adjKept.length - adjNew.length} kept · {adjNew.length} new · {adjRemoved.length} removed</span>
+              <button className="soft" onClick={() => { setAdj(null); setAdjOriginal([]); }}>Cancel</button>
+            </div>
+          </>
         )}
       </div>
 

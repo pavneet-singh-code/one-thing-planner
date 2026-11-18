@@ -2,7 +2,7 @@
 import { Hono, type Context, type Next } from 'hono';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { db } from './db.js';
-import { aiEnabled, AiError, breakDown, planDay, planGoal, readSyllabus } from './ai.js';
+import { aiEnabled, AiError, breakDown, planDay, planGoal, readSyllabus, refinePlan } from './ai.js';
 import { pushEnabled, pushPublicKey, runDueReminders, sendToAll } from './push.js';
 
 const app = new Hono().basePath('/api');
@@ -38,9 +38,13 @@ const int = (v: unknown, min: number, max: number, dflt: number) => {
 const STATUSES = new Set(['later', 'today', 'done']);
 const KINDS = new Set(['study', 'exam', 'placement', 'deadline']);
 const REPEATS = new Set(['', 'daily', 'weekdays', 'weekly']);
+const DAYS_RULE = /^days:[0-6](,[0-6]){0,6}$/;
 const SUBJECT_KINDS = new Set(['course', 'exam', 'placement']);
 const kind = (v: unknown) => (KINDS.has(v as string) ? (v as string) : 'study');
-const repeat = (v: unknown) => (REPEATS.has((v ?? '') as string) ? ((v ?? '') as string) : '');
+const repeat = (v: unknown) => {
+  const s = typeof v === 'string' ? v : '';
+  return REPEATS.has(s) || DAYS_RULE.test(s) ? s : '';
+};
 const link = (v: unknown) => {
   const s = str(v, 500, 'link');
   if (s && !/^https?:\/\//i.test(s)) throw new BadRequest('link must start with http:// or https://');
@@ -261,6 +265,23 @@ app.post('/ai/syllabus', async (c) => {
     examDate: dateStr(b.examDate, 'examDate'),
     hoursPerDay: Math.min(12, Math.max(0.5, Number(b.hoursPerDay) || 2)),
     plan: b.plan !== false,
+  }));
+});
+
+app.post('/ai/refine-plan', async (c) => {
+  const b = await c.req.json<Record<string, unknown>>();
+  const today = dateStr(b.today, 'today') ?? new Date().toISOString().slice(0, 10);
+  if (!Array.isArray(b.tasks)) throw new BadRequest('tasks must be a list');
+  const tasks = (b.tasks as Record<string, unknown>[]).slice(0, 60).map((t) => ({
+    title: str(t.title, 140, 'title'), date: dateStr(t.date, 'date') ?? '', minutes: int(t.minutes, 5, 600, 30), kind: kind(t.kind),
+  })).filter((t) => t.title);
+  const history = Array.isArray(b.history) ? (b.history as unknown[]).slice(-8).map((h) => String(h).slice(0, 300)) : [];
+  return c.json(await refinePlan({
+    instruction: str(b.instruction, 500, 'instruction', true),
+    tasks, today, history,
+    deadline: dateStr(b.deadline, 'deadline'),
+    hoursPerDay: b.hoursPerDay ? Math.min(12, Math.max(0.5, Number(b.hoursPerDay) || 2)) : null,
+    context: str(b.context, 1500, 'context'),
   }));
 });
 

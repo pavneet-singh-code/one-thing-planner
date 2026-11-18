@@ -5,7 +5,7 @@ import { SUBJECT_KINDS } from '../kinds';
 import { toast, type Store } from '../store';
 import { subjectClass } from '../subjects';
 import { Icon } from './Icon';
-import { keepers, ProposalList, type Proposal } from './Proposal';
+import { checkLinks, fromAi, keepers, PlanReview, toFields, type Plan } from './Proposal';
 import { useEditor } from './TaskEditor';
 import { TaskRow } from './Tasks';
 
@@ -116,7 +116,7 @@ function SubjectSheet({ store, subject, onClose }: { store: Store; subject: Subj
   const [hours, setHours] = useState(2);
   const [wantPlan, setWantPlan] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [plan, setPlan] = useState<{ summary: string; tasks: Proposal[] } | null>(null);
+  const [plan, setPlan] = useState<Plan | null>(null);
   const [confirmDel, setConfirmDel] = useState(false);
 
   useEffect(() => { const d = ref.current; if (d && !d.open) d.showModal(); }, []);
@@ -150,7 +150,7 @@ function SubjectSheet({ store, subject, onClose }: { store: Store; subject: Subj
         setTopics(r.topics.map((title) => ({ title, done: doneSet.has(title.toLowerCase()) })));
         if (pdf) setFileName(pdf.name);
       }
-      if (r.tasks.length) setPlan({ summary: r.summary, tasks: r.tasks.map((t) => ({ ...t, keep: true })) });
+      if (r.tasks.length) setPlan({ summary: r.summary, tasks: fromAi(r.tasks, { subject: name.trim(), time: '17:00' }) });
       toast(fromTopics ? 'Plan ready. Check it below.' : `Found ${r.topics.length} topics.`);
     } catch (e) { toast((e as Error).message); }
     finally { setBusy(false); }
@@ -160,14 +160,12 @@ function SubjectSheet({ store, subject, onClose }: { store: Store; subject: Subj
 
   const save = async () => {
     if (!name.trim()) { toast('Give the subject a name.'); return; }
+    if (plan && !checkLinks(plan.tasks)) return;
     const s = toSubject();
     try { await store.actions.saveSubject(s); } catch { return; }
     const kept = plan ? keepers(plan.tasks) : [];
     if (kept.length) {
-      await store.actions.add(kept.map((t) => ({
-        title: t.title.trim(), subject: s.name, due: t.date || null, est: t.minutes,
-        remindAt: t.date ? new Date(t.date + 'T17:00').toISOString() : null,
-      })));
+      await store.actions.add(kept.map((t) => ({ ...toFields(t), subject: t.subject.trim() || s.name })));
     }
     toast(kept.length ? `Saved, and added ${kept.length} tasks.` : 'Saved.');
     close();
@@ -257,9 +255,9 @@ function SubjectSheet({ store, subject, onClose }: { store: Store; subject: Subj
         {plan && (
           <section className="box">
             <h3><Icon name="sparkle" size={16} /> Proposed plan</h3>
-            {plan.summary && <p className="why" style={{ margin: 0 }}>{plan.summary}</p>}
-            <div className="proposal"><ProposalList tasks={plan.tasks} onChange={(t) => setPlan({ ...plan, tasks: t })} /></div>
-            <p className="muted small" style={{ margin: 0 }}>These are added when you press Save. Each gets a 5 pm reminder on its day.</p>
+            <PlanReview plan={plan} setPlan={setPlan} store={store}
+              context={{ text: `${kind === 'placement' ? 'Placement preparation' : kind === 'exam' ? 'Exam preparation' : 'Course'} for "${name.trim()}". Syllabus topics: ${topics.map((t) => t.title).join('; ')}`.slice(0, 1500), deadline: examDate || null, hoursPerDay: hours }} />
+            <p className="muted small" style={{ margin: 0 }}>These are added when you press Save.</p>
           </section>
         )}
 

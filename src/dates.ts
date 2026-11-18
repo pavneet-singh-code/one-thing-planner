@@ -25,9 +25,10 @@ export const mmss = (sec: number) => `${pad(Math.floor(sec / 60))}:${pad(sec % 6
 export const nextRepeat = (from: string, rule: string) => {
   const td = today();
   let d = from;
+  const pick = rule.startsWith('days:') ? rule.slice(5).split(',').map(Number) : rule === 'weekdays' ? [1, 2, 3, 4, 5] : null;
   do {
     d = addDays(d, rule === 'weekly' ? 7 : 1);
-    if (rule === 'weekdays') while ([0, 6].includes(new Date(d + 'T12:00').getDay())) d = addDays(d, 1);
+    if (pick?.length) for (let i = 0; i < 7 && !pick.includes(new Date(d + 'T12:00').getDay()); i++) d = addDays(d, 1);
   } while (d <= td);
   return d;
 };

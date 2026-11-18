@@ -2,7 +2,8 @@ import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import type { Kind, Repeat, Step, Task } from '../api';
 import { fromLocalInput, toLocalInput } from '../dates';
 import { TODAY_LIMIT, toast, type Store } from '../store';
-import { KINDS, REPEATS } from '../kinds';
+import { KINDS } from '../kinds';
+import { RepeatPicker } from './RepeatPicker';
 import { Icon } from './Icon';
 import { RevisePicker } from './Tasks';
 
@@ -88,11 +89,7 @@ export function TaskEditor({ store, req, onClose }: { store: Store; req: EditReq
             </div>
           </label>
           <label className="f wide">Remind me at<input type="datetime-local" value={rem} onChange={(e) => setRem(e.target.value)} /></label>
-          <label className="f wide">Repeat
-            <select value={repeat} onChange={(e) => setRepeat(e.target.value as Repeat)}>
-              {REPEATS.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
-            </select>
-          </label>
+          <div className="f full"><span>Repeat</span><RepeatPicker value={repeat} onChange={setRepeat} /></div>
           <label className="f wide">Link <span className="muted" style={{ fontWeight: 400 }}>(test, meeting, form)</span>
             <input type="url" maxLength={500} value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://…" />
           </label>

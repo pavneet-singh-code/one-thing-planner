@@ -1,13 +1,14 @@
 import { useMemo, useState } from 'react';
-import { api, type Task } from '../api';
+import { api, type Repeat, type Task } from '../api';
 import { addDays, fmtShort, fmtTime, greeting, today, weekday, ymd } from '../dates';
 import { useDrag } from '../drag';
-import { kindLabel } from '../kinds';
+import { kindLabel, repeatLabel } from '../kinds';
 import { getName, TODAY_LIMIT, toast, type Store } from '../store';
 import { subjectClass } from '../subjects';
 import { FocusTimer } from './FocusTimer';
 import { HeroArt, Sprig } from './Hero';
 import { Icon } from './Icon';
+import { RepeatPicker } from './RepeatPicker';
 import { useEditor } from './TaskEditor';
 
 /* ---------- shared bits ---------- */
@@ -26,7 +27,7 @@ export function Chips({ t }: { t: Task }) {
       <span className="chip"><Icon name="clock" size={13} />{t.est} min</span>
       {t.remindAt && t.status !== 'done' && <span className="chip"><Icon name="bell" size={13} />{fmtTime(t.remindAt)}</span>}
       {t.steps.length > 0 && <span className="chip">{t.steps.filter((s) => s.done).length}/{t.steps.length} steps</span>}
-      {t.repeat && <span className="chip"><Icon name="repeat" size={13} />{t.repeat}</span>}
+      {t.repeat && <span className="chip"><Icon name="repeat" size={13} />{repeatLabel(t.repeat, t.due)}</span>}
       {t.link && <a className="chip linkchip" href={t.link} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}><Icon name="link" size={13} />Open link</a>}
     </div>
   );
@@ -279,6 +280,8 @@ export function TasksPanel({ store }: { store: Store }) {
         </div>
       )}
 
+      <Routines store={store} />
+
       <section className="card">
         <div className="section-head"><h2>Today</h2><span className="muted small">{todays.length}/{TODAY_LIMIT}</span></div>
         <div className="list">
@@ -321,5 +324,82 @@ export function RevisePicker({ t, store }: { t: Task; store: Store }) {
       {REVISE.map((r) => <button key={r.label} className="soft sm" onClick={() => { store.actions.addRevisions(t, r.days); setOpen(false); }}>{r.label}</button>)}
       <button className="icon-btn" aria-label="Cancel" onClick={() => setOpen(false)}><Icon name="x" size={14} /></button>
     </div>
+  );
+}
+
+/* ---------- Repeating tasks: their own list and add form ---------- */
+export function Routines({ store }: { store: Store }) {
+  const edit = useEditor();
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState('');
+  const [subject, setSubject] = useState('');
+  const [est, setEst] = useState(30);
+  const [repeat, setRepeat] = useState<Repeat>('daily');
+  const [start, setStart] = useState(today());
+  const [time, setTime] = useState('');
+  const subjects = [...new Set([...store.subjects.map((s) => s.name), ...store.tasks.map((t) => t.subject)].filter(Boolean))];
+
+  // one row per series: the next open occurrence
+  const series = new Map<string, Task>();
+  for (const t of store.tasks) {
+    if (!t.repeat || t.status === 'done') continue;
+    const k = `${t.title}|${t.subject}|${t.repeat}`;
+    const cur = series.get(k);
+    if (!cur || (t.due ?? '') < (cur.due ?? '')) series.set(k, t);
+  }
+  const list = [...series.values()].sort((a, b) => (a.due ?? '').localeCompare(b.due ?? ''));
+
+  const add = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim()) return;
+    if (!repeat) { toast('Choose how often it repeats.'); return; }
+    await store.actions.add([{ title: title.trim(), subject: subject.trim(), est, repeat, due: start, remindAt: time ? new Date(`${start}T${time}`).toISOString() : null }]);
+    toast(`Repeating task added (${repeatLabel(repeat, start)}).`);
+    setTitle('');
+  };
+
+  return (
+    <section className="card routines">
+      <div className="section-head">
+        <h2><Icon name="repeat" /> Repeating tasks</h2>
+        <button className={open ? 'soft sm' : 'primary sm'} onClick={() => setOpen((v) => !v)}>{open ? 'Close' : <><Icon name="plus" size={14} /> New repeating task</>}</button>
+      </div>
+      {open && (
+        <form className="box" onSubmit={add}>
+          <label className="f">What
+            <input required maxLength={140} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. 20 aptitude questions, Revise formulas, Mock interview" autoFocus />
+          </label>
+          <div className="f"><span>Repeats</span><RepeatPicker value={repeat} onChange={setRepeat} /></div>
+          <div className="grid">
+            <label className="f">Starts<input type="date" value={start} onChange={(e) => setStart(e.target.value)} /></label>
+            <label className="f">Remind at<input type="time" value={time} onChange={(e) => setTime(e.target.value)} /></label>
+            <label className="f">Minutes<input type="number" min={5} max={600} step={5} value={est} onChange={(e) => setEst(Number(e.target.value) || 30)} /></label>
+            <label className="f">Subject<input maxLength={40} list="routSubj" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="TCS NQT" /></label>
+          </div>
+          <datalist id="routSubj">{subjects.map((s) => <option key={s} value={s} />)}</datalist>
+          <div className="actions"><button className="primary" type="submit" disabled={!title.trim() || !repeat}>Add repeating task</button></div>
+        </form>
+      )}
+      <div className="list">
+        {list.length ? list.map((t) => (
+          <div className="row" key={t.id}>
+            <span className="slot"><Icon name="repeat" size={16} /></span>
+            <div className="main" role="button" tabIndex={0} onClick={() => edit({ task: t })} onKeyDown={(e) => { if (e.key === 'Enter') edit({ task: t }); }}>
+              <span className="t">{t.title}</span>
+              <div className="meta">
+                <span className="chip strong-chip">{repeatLabel(t.repeat, t.due)}</span>
+                {t.due && <span className="chip"><Icon name="calendar" size={13} />Next: {t.due === today() ? 'Today' : fmtShort(t.due)}</span>}
+                {t.remindAt && <span className="chip"><Icon name="bell" size={13} />{new Date(t.remindAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}</span>}
+                <span className="chip"><Icon name="clock" size={13} />{t.est} min</span>
+                {t.subject && <span className={'tag ' + subjectClass(t.subject)}>{t.subject}</span>}
+              </div>
+            </div>
+            <div className="btns">
+              <button className="soft sm" title="Keep this one, stop future repeats" onClick={() => { store.actions.edit(t, { repeat: '' }); toast('It won’t repeat any more.'); }}>Stop</button>
+            </div>
+          </div>
+        )) : <p className="empty">Nothing repeats yet. Add daily practice, weekly mocks or revision here.</p>}
+      </div>
+    </section>
   );
 }

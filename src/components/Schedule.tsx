@@ -3,6 +3,7 @@ import type { Kind, Subject, Task } from '../api';
 import { addDays, dayNum, daysBetween, fmtClock, fmtDay, fmtShort, startOfWeek, today, weekday, ymd } from '../dates';
 import { useDrag } from '../drag';
 import { KINDS, taskClass } from '../kinds';
+import { subjectClass } from '../subjects';
 import { toast, type Store } from '../store';
 import { Icon } from './Icon';
 import { useEditor } from './TaskEditor';
@@ -17,13 +18,13 @@ const rank = (t: Task) => (t.kind === 'exam' || t.kind === 'placement' ? 0 : t.k
 const subjectsOn = (store: Store, day: string) => store.subjects.filter((s) => s.examDate === day && s.kind !== 'course');
 
 /** One day: exam/placement markers, then tasks. Tasks can be dragged to another day. */
-function DayColumn({ store, day, compact, drag, goTo }: {
-  store: Store; day: string; compact?: boolean; drag: ReturnType<typeof useDrag>; goTo: (tab: string) => void;
+function DayColumn({ store, day, compact, drag, goTo, filter }: {
+  store: Store; day: string; compact?: boolean; drag: ReturnType<typeof useDrag>; goTo: (tab: string) => void; filter?: Filter;
 }) {
   const edit = useEditor();
   const td = today();
-  const items = tasksOn(store, day);
-  const marks = subjectsOn(store, day);
+  const items = tasksOn(store, day).filter((t) => !filter || matchTask(filter, t));
+  const marks = subjectsOn(store, day).filter((s) => !filter || matchMark(filter, s));
   const mins = items.filter((t) => t.status !== 'done' && t.kind === 'study').reduce((a, t) => a + t.est, 0);
   return (
     <div className={(compact ? 'strip-day' : 'cal-day') + (day === td ? ' today' : '') + (day < td ? ' past' : '')} data-drop={`day:${day}`}>
@@ -126,8 +127,12 @@ export function CalendarPanel({ store, goTo }: { store: Store; goTo: (tab: strin
   const td = today();
   const [start, setStart] = useState(startOfWeek(td));
   const drag = useDayDrop(store);
+  const [filter, setFilterState] = useState<Filter>(loadFilter);
+  const setFilter = (f: Filter) => { setFilterState(f); try { localStorage.setItem(FILTER_KEY, JSON.stringify(f)); } catch { /* ignore */ } };
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
-  const undated = store.laters.filter((t) => !t.due && !t.remindAt);
+  const undated = store.laters.filter((t) => !t.due && !t.remindAt && matchTask(filter, t));
+  const weekTasks = days.flatMap((d) => tasksOn(store, d));
+  const shown = weekTasks.filter((t) => matchTask(filter, t)).length;
   return (
     <div className="page wide">
       <QuickAdd store={store} defaultDay={start <= td && td <= days[6] ? td : start} />
@@ -140,10 +145,11 @@ export function CalendarPanel({ store, goTo }: { store: Store; goTo: (tab: strin
             <button className="icon-btn" aria-label="Next week" onClick={() => setStart(addDays(start, 7))}><Icon name="right" /></button>
           </div>
         </div>
-        <Legend />
+        <FilterBar store={store} filter={filter} setFilter={setFilter} shown={shown} total={weekTasks.length} />
         <div className="cal">
-          {days.map((day) => <DayColumn key={day} store={store} day={day} drag={drag} goTo={goTo} />)}
+          {days.map((day) => <DayColumn key={day} store={store} day={day} drag={drag} goTo={goTo} filter={filter} />)}
         </div>
+        {isFiltered(filter) && shown === 0 && <p className="empty">Nothing this week matches your filters.</p>}
       </section>
       {undated.length > 0 && (
         <section className="card">
@@ -188,5 +194,79 @@ function QuickAdd({ store, defaultDay }: { store: Store; defaultDay: string }) {
         ))}
       </div>
     </form>
+  );
+}
+
+/* ---------- calendar filters ---------- */
+type Status = 'all' | 'open' | 'done';
+export type Filter = { q: string; kinds: Kind[]; subjects: string[]; status: Status; repeating: boolean };
+const FILTER_KEY = 'onething.calfilter';
+const NO_FILTER: Filter = { q: '', kinds: [], subjects: [], status: 'all', repeating: false };
+const NONE = '(no subject)';
+function loadFilter(): Filter {
+  try { return { ...NO_FILTER, ...JSON.parse(localStorage.getItem(FILTER_KEY) ?? '{}') }; } catch { return NO_FILTER; }
+}
+const isFiltered = (f: Filter) => !!(f.q.trim() || f.kinds.length || f.subjects.length || f.status !== 'all' || f.repeating);
+
+function matchTask(f: Filter, t: Task) {
+  if (f.kinds.length && !f.kinds.includes(t.kind)) return false;
+  if (f.subjects.length && !f.subjects.includes(t.subject || NONE)) return false;
+  if (f.status === 'open' && t.status === 'done') return false;
+  if (f.status === 'done' && t.status !== 'done') return false;
+  if (f.repeating && !t.repeat) return false;
+  const q = f.q.trim().toLowerCase();
+  if (q && !`${t.title} ${t.notes} ${t.subject}`.toLowerCase().includes(q)) return false;
+  return true;
+}
+function matchMark(f: Filter, s: Subject) {
+  if (f.kinds.length && !f.kinds.includes(s.kind as Kind)) return false;
+  if (f.subjects.length && !f.subjects.includes(s.name)) return false;
+  if (f.status === 'done' || f.repeating) return false;
+  const q = f.q.trim().toLowerCase();
+  return !q || s.name.toLowerCase().includes(q);
+}
+
+function FilterBar({ store, filter: f, setFilter, shown, total }: { store: Store; filter: Filter; setFilter: (f: Filter) => void; shown: number; total: number }) {
+  const subjects = [...new Set([...store.subjects.map((s) => s.name), ...store.tasks.map((t) => t.subject || NONE)])].sort((a, b) => (a === NONE ? 1 : b === NONE ? -1 : a.localeCompare(b)));
+  const toggle = <T,>(list: T[], v: T) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
+  return (
+    <div className="filters">
+      <div className="filter-top">
+        <label className="search sm"><Icon name="search" size={16} />
+          <input value={f.q} onChange={(e) => setFilter({ ...f, q: e.target.value })} placeholder="Search this calendar" aria-label="Search calendar" />
+        </label>
+        <div className="seg" role="group" aria-label="Status">
+          {(['all', 'open', 'done'] as const).map((st) => (
+            <button type="button" key={st} className={f.status === st ? 'on' : ''} onClick={() => setFilter({ ...f, status: st })}>{st === 'all' ? 'All' : st === 'open' ? 'To do' : 'Done'}</button>
+          ))}
+        </div>
+        <button type="button" className={'pill' + (f.repeating ? ' on' : '')} aria-pressed={f.repeating} onClick={() => setFilter({ ...f, repeating: !f.repeating })}>
+          <Icon name="repeat" size={14} />Repeating
+        </button>
+        {isFiltered(f) && <button type="button" className="soft sm" onClick={() => setFilter(NO_FILTER)}><Icon name="x" size={14} />Clear filters</button>}
+        <span className="muted small filter-count">{isFiltered(f) ? `Showing ${shown} of ${total}` : `${total} this week`}</span>
+      </div>
+      <div className="pills" role="group" aria-label="Type">
+        <span className="label">Type</span>
+        {KINDS.map((k) => (
+          <button type="button" key={k.id} aria-pressed={f.kinds.includes(k.id)}
+            className={'pill' + (f.kinds.includes(k.id) ? ' on' + (k.id !== 'study' ? ' k-' + k.id : '') : '')}
+            onClick={() => setFilter({ ...f, kinds: toggle(f.kinds, k.id) })}>
+            <i className={'dot ' + (k.id === 'study' ? 's0' : 'k-' + k.id)} />{k.label}
+          </button>
+        ))}
+      </div>
+      {subjects.length > 0 && (
+        <div className="pills" role="group" aria-label="Subject">
+          <span className="label">Subject</span>
+          {subjects.map((s) => (
+            <button type="button" key={s} aria-pressed={f.subjects.includes(s)} className={'pill' + (f.subjects.includes(s) ? ' on' : '')}
+              onClick={() => setFilter({ ...f, subjects: toggle(f.subjects, s) })}>
+              <i className={'dot ' + (s === NONE ? 's-none' : subjectClass(s))} />{s}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
