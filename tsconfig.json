@@ -9,8 +9,7 @@
     "noUnusedLocals": true,
     "skipLibCheck": true,
     "isolatedModules": true,
-    "noEmit": true,
-    "types": ["node", "vite/client", "vite-plugin-pwa/client"]
+    "noEmit": true
   },
   "include": ["src", "server", "api", "vite.config.ts"],
   "exclude": ["src/sw.ts"]

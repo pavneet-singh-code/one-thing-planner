@@ -1,8 +1,14 @@
 /// <reference lib="webworker" />
+import { clientsClaim } from 'workbox-core';
 import { cleanupOutdatedCaches, createHandlerBoundToURL, precacheAndRoute } from 'workbox-precaching';
 import { NavigationRoute, registerRoute } from 'workbox-routing';
 
 declare const self: ServiceWorkerGlobalScope & { __WB_MANIFEST: Array<string | { url: string; revision: string | null }> };
+
+// A new version takes over straight away instead of waiting until every tab is closed;
+// the page then reloads itself (registerType: 'autoUpdate').
+self.skipWaiting();
+clientsClaim();
 
 // App shell works offline.
 precacheAndRoute(self.__WB_MANIFEST);
