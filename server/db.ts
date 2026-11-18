@@ -21,6 +21,7 @@ create table if not exists tasks (
   created_at  timestamptz not null default now(),
   done_at     timestamptz
 );
+alter table tasks add column if not exists notes text not null default '';
 create index if not exists tasks_remind_idx on tasks (remind_at) where reminded = false;
 
 create table if not exists focus_log (

@@ -4,6 +4,7 @@ export interface Task {
   id: string;
   title: string;
   subject: string;
+  notes: string;
   due: string | null;
   remindAt: string | null;
   est: number;

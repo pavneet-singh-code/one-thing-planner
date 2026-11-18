@@ -1,38 +1,72 @@
 import { useEffect, useState } from 'react';
 import { api, getKey, setKey } from '../api';
-import { addDays, fmtDay, today } from '../dates';
+import { addDays, dayNum, fmtClock, fmtDay, fmtShort, startOfWeek, today, weekday, ymd } from '../dates';
 import { currentSubscription, disablePush, enablePush, pushSupported } from '../push';
-import { toast, type Store } from '../store';
+import { getName, setName, toast, type Store } from '../store';
+import { subjectClass } from '../subjects';
+import { Icon } from './Icon';
+import { useEditor } from './TaskEditor';
+import { TaskRow, tasksOn } from './Tasks';
 
-/* ---------- Week ---------- */
-export function WeekPanel({ store }: { store: Store }) {
-  const d = today();
+/* ---------- Calendar (week view) ---------- */
+export function CalendarPanel({ store }: { store: Store }) {
+  const edit = useEditor();
+  const td = today();
+  const [start, setStart] = useState(startOfWeek(td));
+  const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
+  const undated = store.laters.filter((t) => !t.due && !t.remindAt);
   return (
-    <div className="panel">
-      <div className="week">
-        {Array.from({ length: 7 }, (_, i) => {
-          const day = addDays(d, i);
-          const items = store.tasks.filter((t) => t.due === day || (!t.due && t.remindAt && new Date(t.remindAt).toDateString() === new Date(day + 'T12:00').toDateString()));
-          return (
-            <div className={'day' + (i === 0 ? ' today' : '')} key={day}>
-              <h3>{i === 0 ? 'Today' : fmtDay(day)}</h3>
-              {items.length ? items.map((t) => <div key={t.id} className={'it' + (t.status === 'done' ? ' done' : '')}>{t.title}</div>)
-                : <div className="muted small">Free</div>}
-            </div>
-          );
-        })}
-      </div>
+    <div className="page">
+      <section className="card">
+        <div className="section-head">
+          <h2>{fmtShort(start)} – {fmtShort(days[6])}</h2>
+          <div className="actions">
+            <button className="icon-btn" aria-label="Previous week" onClick={() => setStart(addDays(start, -7))}><Icon name="left" /></button>
+            <button className="soft sm" onClick={() => setStart(startOfWeek(td))}>This week</button>
+            <button className="icon-btn" aria-label="Next week" onClick={() => setStart(addDays(start, 7))}><Icon name="right" /></button>
+          </div>
+        </div>
+        <div className="cal">
+          {days.map((day) => {
+            const items = tasksOn(store, day);
+            const mins = items.filter((t) => t.status !== 'done').reduce((a, t) => a + t.est, 0);
+            return (
+              <div className={'cal-day' + (day === td ? ' today' : '') + (day < td ? ' past' : '')} key={day}>
+                <div className="cal-head">
+                  <span>{weekday(day)}</span><b>{dayNum(day)}</b>
+                  {mins > 0 && <small>{mins >= 60 ? `${Math.round(mins / 6) / 10}h` : `${mins}m`}</small>}
+                </div>
+                {items.map((t) => (
+                  <button key={t.id} className={'event ' + subjectClass(t.subject) + (t.status === 'done' ? ' done' : '')} onClick={() => edit({ task: t })}>
+                    <span className="event-t">{t.title}</span>
+                    <span className="event-m">{t.remindAt && ymd(new Date(t.remindAt)) === day ? fmtClock(t.remindAt) : `${t.est} min`}{t.subject ? ` · ${t.subject}` : ''}</span>
+                  </button>
+                ))}
+                {day >= td && <button className="add-slot" aria-label={`Add task on ${fmtDay(day)}`} onClick={() => edit({ preset: { due: day, wantToday: day === td } })}><Icon name="plus" size={14} /> Add</button>}
+              </div>
+            );
+          })}
+        </div>
+      </section>
+      {undated.length > 0 && (
+        <section className="card">
+          <div className="section-head"><h2>No date yet</h2><span className="muted small">Tap one to give it a day.</span></div>
+          <div className="list">{undated.map((t) => <TaskRow key={t.id} t={t} store={store} />)}</div>
+        </section>
+      )}
     </div>
   );
 }
 
 /* ---------- AI ---------- */
+type Proposal = { title: string; date: string; minutes: number; keep: boolean };
+
 export function AiPanel({ store }: { store: Store }) {
   const [goal, setGoal] = useState('');
   const [deadline, setDeadline] = useState(addDays(today(), 7));
   const [hours, setHours] = useState(2);
   const [subject, setSubject] = useState('');
-  const [plan, setPlan] = useState<{ summary: string; tasks: { title: string; date: string; minutes: number; keep: boolean }[] } | null>(null);
+  const [plan, setPlan] = useState<{ summary: string; tasks: Proposal[] } | null>(null);
   const [remind, setRemind] = useState(true);
   const [busyGoal, setBusyGoal] = useState(false);
 
@@ -41,7 +75,7 @@ export function AiPanel({ store }: { store: Store }) {
   const [busyDay, setBusyDay] = useState(false);
 
   if (!store.state?.ai) return (
-    <div className="panel"><p className="note">AI is off. Add GEMINI_API_KEY to the server’s environment variables to turn it on.</p></div>
+    <div className="page"><div className="card"><p className="note">AI is off. Add GEMINI_API_KEY to the server’s environment variables to turn it on.</p></div></div>
   );
 
   const makePlan = async () => {
@@ -53,16 +87,17 @@ export function AiPanel({ store }: { store: Store }) {
     } catch (e) { toast((e as Error).message); }
     finally { setBusyGoal(false); }
   };
+  const keepers = plan ? plan.tasks.filter((t) => t.keep && t.title.trim()) : [];
   const acceptPlan = async () => {
     if (!plan) return;
-    const keep = plan.tasks.filter((t) => t.keep);
-    await store.actions.add(keep.map((t) => ({
-      title: t.title, subject: subject.trim(), due: t.date || null, est: t.minutes,
+    await store.actions.add(keepers.map((t) => ({
+      title: t.title.trim(), subject: subject.trim(), due: t.date || null, est: t.minutes,
       remindAt: remind && t.date ? new Date(t.date + 'T17:00').toISOString() : null,
     })));
     setPlan(null); setGoal('');
-    toast(`Added ${keep.length} tasks to Later.`);
+    toast(`Added ${keepers.length} tasks to Later.`);
   };
+  const upd = (i: number, p: Partial<Proposal>) => plan && setPlan({ ...plan, tasks: plan.tasks.map((x, j) => (j === i ? { ...x, ...p } : x)) });
 
   const planDay = async () => {
     setBusyDay(true); setDayPlan(null);
@@ -73,36 +108,46 @@ export function AiPanel({ store }: { store: Store }) {
   const byId = (id: string) => store.tasks.find((t) => t.id === id);
 
   return (
-    <div className="panel">
+    <div className="page">
       <div className="card">
         <div>
-          <h2>Break a big goal into tasks</h2>
-          <p className="muted small" style={{ margin: '4px 0 0' }}>Describe the goal and the deadline. The AI proposes small tasks spread across the days; you choose which to keep.</p>
+          <h2><Icon name="sparkle" /> Break a big goal into tasks</h2>
+          <p className="muted small" style={{ margin: '4px 0 0' }}>Describe the goal and the deadline. The AI proposes small tasks spread across the days. Edit, remove or add tasks before you keep them.</p>
         </div>
         <div className="grid">
           <label className="f full">Goal
-            <textarea id="gGoal" maxLength={1500} value={goal} onChange={(e) => setGoal(e.target.value)}
-              placeholder="e.g. Physics mid-term on chapters 4–7: kinematics, laws of motion, work & energy, rotation. I'm weak at rotation." />
+            <textarea maxLength={1500} value={goal} onChange={(e) => setGoal(e.target.value)}
+              placeholder="e.g. NALR exam: Partnerships, Coding-decoding, Mixture & alligation, Percentage. One PDF per topic; I'm weakest at mixtures." />
           </label>
-          <label className="f">Deadline<input id="gDate" type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} /></label>
-          <label className="f">Hours / day<input id="gHours" type="number" min={0.5} max={12} step={0.5} value={hours} onChange={(e) => setHours(Number(e.target.value) || 2)} /></label>
-          <label className="f wide">Subject<input id="gSubject" maxLength={40} list="subjList" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Physics" /></label>
+          <label className="f">Deadline<input type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} /></label>
+          <label className="f">Hours / day<input type="number" min={0.5} max={12} step={0.5} value={hours} onChange={(e) => setHours(Number(e.target.value) || 2)} /></label>
+          <label className="f wide">Subject<input maxLength={40} list="subjList" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="NALR" /></label>
         </div>
         <div className="actions"><button className="primary" disabled={busyGoal || !goal.trim()} onClick={makePlan}>{busyGoal ? 'Planning…' : 'Make a plan'}</button></div>
         {plan && (
           <div className="proposal">
             {plan.summary && <p className="why" style={{ margin: 0 }}>{plan.summary}</p>}
             {plan.tasks.map((t, i) => (
-              <label className="prop" key={i}>
-                <input type="checkbox" checked={t.keep} onChange={(e) => setPlan({ ...plan, tasks: plan.tasks.map((x, j) => (j === i ? { ...x, keep: e.target.checked } : x)) })} />
-                <div><div className="strong">{t.title}</div>
-                  <div className="meta"><span className="chip">{t.date ? fmtDay(t.date) : 'no date'}</span><span className="chip">{t.minutes} min</span></div></div>
-              </label>
+              <div className={'prop' + (t.keep ? '' : ' off')} key={i}>
+                <input type="checkbox" aria-label="Keep this task" checked={t.keep} onChange={(e) => upd(i, { keep: e.target.checked })} />
+                <div className="prop-fields">
+                  <input className="bare strong" aria-label="Task" maxLength={140} value={t.title} placeholder="Task" onChange={(e) => upd(i, { title: e.target.value })} />
+                  <div className="prop-row">
+                    <input type="date" aria-label="Day" value={t.date} onChange={(e) => upd(i, { date: e.target.value })} />
+                    <label className="mins"><input type="number" aria-label="Minutes" min={5} max={600} step={5} value={t.minutes} onChange={(e) => upd(i, { minutes: Number(e.target.value) || 30 })} /> min</label>
+                  </div>
+                </div>
+                <button className="icon-btn" aria-label="Remove" onClick={() => setPlan({ ...plan, tasks: plan.tasks.filter((_, j) => j !== i) })}><Icon name="x" size={16} /></button>
+              </div>
             ))}
-            <label className="prop"><input type="checkbox" checked={remind} onChange={(e) => setRemind(e.target.checked)} /><div>Remind me at 5:00 pm on each task’s day</div></label>
+            <button className="soft sm" style={{ alignSelf: 'flex-start' }}
+              onClick={() => setPlan({ ...plan, tasks: [...plan.tasks, { title: '', date: plan.tasks.at(-1)?.date ?? today(), minutes: 30, keep: true }] })}>
+              <Icon name="plus" size={14} /> Add a task
+            </button>
+            <label className="check-line"><input type="checkbox" checked={remind} onChange={(e) => setRemind(e.target.checked)} /> Remind me at 5:00 pm on each task’s day</label>
             <div className="actions">
-              <button className="primary" onClick={acceptPlan}>Add {plan.tasks.filter((t) => t.keep).length} tasks</button>
-              <button className="ghost" onClick={() => setPlan(null)}>Discard</button>
+              <button className="primary" disabled={!keepers.length} onClick={acceptPlan}>Add {keepers.length} tasks</button>
+              <button className="soft" onClick={() => setPlan(null)}>Discard</button>
             </div>
           </div>
         )}
@@ -110,21 +155,21 @@ export function AiPanel({ store }: { store: Store }) {
 
       <div className="card">
         <div>
-          <h2>Pick today’s three for me</h2>
+          <h2><Icon name="target" /> Pick today’s three for me</h2>
           <p className="muted small" style={{ margin: '4px 0 0' }}>The AI looks at deadlines and time estimates and picks what matters most today.</p>
         </div>
         <div className="grid"><label className="f wide">Time I have today (hours)
-          <input id="dHours" type="number" min={0.5} max={14} step={0.5} value={dayHours} onChange={(e) => setDayHours(Number(e.target.value) || 3)} /></label></div>
+          <input type="number" min={0.5} max={14} step={0.5} value={dayHours} onChange={(e) => setDayHours(Number(e.target.value) || 3)} /></label></div>
         <div className="actions"><button className="primary" disabled={busyDay} onClick={planDay}>{busyDay ? 'Thinking…' : 'Plan my day'}</button></div>
         {dayPlan && (
           <div className="proposal">
             {dayPlan.pick.map((p, i) => byId(p.id) && (
-              <div className="prop" key={p.id}><div className="slot">{i + 1}</div><div><div className="strong">{byId(p.id)!.title}</div><div className="why">{p.why}</div></div></div>
+              <div className="prop" key={p.id}><span className="slot">{i + 1}</span><div><div className="strong">{byId(p.id)!.title}</div><div className="why">{p.why}</div></div></div>
             ))}
             {dayPlan.advice && <p className="why" style={{ margin: 0 }}>{dayPlan.advice}</p>}
             <div className="actions">
               <button className="primary" onClick={async () => { await store.actions.applyDayPlan(dayPlan.pick.map((p) => p.id).filter((id) => byId(id))); setDayPlan(null); toast('Today is set. Start with the first one.'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>Use this plan</button>
-              <button className="ghost" onClick={() => setDayPlan(null)}>Discard</button>
+              <button className="soft" onClick={() => setDayPlan(null)}>Discard</button>
             </div>
           </div>
         )}
@@ -162,9 +207,10 @@ export function SettingsPanel({ store }: { store: Store }) {
   };
 
   return (
-    <div className="panel">
+    <div className="page settings">
+      <NameCard />
       <div className="card">
-        <h2>Notifications</h2>
+        <h2><Icon name="bell" /> Notifications</h2>
         {!s?.push ? <p className="note">Push is off on the server. Add the VAPID keys to the environment variables (see README).</p>
           : !pushSupported() ? <p className="note">This browser can’t receive push notifications. On Android, use Chrome.</p>
           : (
@@ -172,7 +218,7 @@ export function SettingsPanel({ store }: { store: Store }) {
               <p className="muted small" style={{ margin: 0 }}>Reminders and focus-timer alarms arrive as phone notifications, even when the app is closed.</p>
               <div className="actions">
                 <button className="primary" disabled={busy || subscribed === null} onClick={toggle}>{subscribed ? 'Turn off on this device' : 'Turn on notifications'}</button>
-                {subscribed && <button onClick={test}>Send a test</button>}
+                {subscribed && <button className="soft" onClick={test}>Send a test</button>}
               </div>
             </>
           )}
@@ -186,8 +232,22 @@ export function SettingsPanel({ store }: { store: Store }) {
       <div className="card">
         <h2>Access key</h2>
         <p className="muted small" style={{ margin: 0 }}>This device is unlocked with your access key. Lock it to remove the key from this device.</p>
-        <div className="actions"><button onClick={() => { setKey(''); location.reload(); }} disabled={!getKey()}>Lock this device</button></div>
+        <div className="actions"><button className="soft" onClick={() => { setKey(''); location.reload(); }} disabled={!getKey()}>Lock this device</button></div>
       </div>
+    </div>
+  );
+}
+
+function NameCard() {
+  const [n, setN] = useState(getName());
+  return (
+    <div className="card">
+      <h2>Your name</h2>
+      <p className="muted small" style={{ margin: 0 }}>Used for the greeting on the home page. Saved on this device only.</p>
+      <form className="inline-form" onSubmit={(e) => { e.preventDefault(); setName(n.trim()); toast('Saved.'); }}>
+        <label className="f">Name<input maxLength={30} value={n} onChange={(e) => setN(e.target.value)} placeholder="Your first name" /></label>
+        <button className="primary" type="submit">Save</button>
+      </form>
     </div>
   );
 }
@@ -198,9 +258,9 @@ export function KeyGate({ onUnlock, error }: { onUnlock: () => void; error?: str
   return (
     <div className="gate">
       <form className="card" onSubmit={(e) => { e.preventDefault(); setKey(k.trim()); onUnlock(); }}>
-        <h1>One <span className="hl">Thing</span></h1>
+        <div className="brand big"><span className="logo" aria-hidden="true">1</span>One Thing</div>
         <p className="muted" style={{ margin: 0 }}>Enter your access key to open your planner on this device. You only need to do this once.</p>
-        <label className="f">Access key<input id="key" type="password" autoComplete="current-password" value={k} onChange={(e) => setK(e.target.value)} autoFocus /></label>
+        <label className="f">Access key<input type="password" autoComplete="current-password" value={k} onChange={(e) => setK(e.target.value)} autoFocus /></label>
         {error && <p className="err">{error}</p>}
         <div className="actions"><button className="primary" type="submit" disabled={!k.trim()}>Unlock</button></div>
       </form>

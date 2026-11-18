@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { mmss } from '../dates';
 import { toast } from '../store';
+import { Icon } from './Icon';
 
 const FOCUS = 25 * 60;
 const BREAK = 5 * 60;
@@ -78,16 +79,25 @@ export function FocusTimer({ taskId, taskTitle, onFocusDone }: { taskId: string;
   const pause = () => { update({ ...t, left, endsAt: null }); api.clearAlarm('timer').catch(() => {}); };
   const reset = () => { update(fresh()); api.clearAlarm('timer').catch(() => {}); };
 
-  const label = running ? 'Pause' : t.mode === 'break' ? 'Start break' : left < FOCUS ? 'Resume' : 'Start 25 min focus';
+  const total = t.mode === 'break' ? BREAK : FOCUS;
+  const pct = 1 - left / total;
+  const R = 34, C = 2 * Math.PI * R;
+  const label = running ? 'Pause' : t.mode === 'break' ? 'Start break' : left < FOCUS ? 'Resume' : 'Start focus';
   return (
-    <div className="timer-row">
-      <div>
-        <div className="label">{t.mode === 'break' ? 'Break' : 'Focus'}</div>
-        <div className={'timer' + (t.mode === 'break' ? ' break' : '')} role="timer">{mmss(left)}</div>
+    <div className={'timer-row' + (t.mode === 'break' ? ' break' : '')}>
+      <div className="ring" role="timer" aria-label={`${t.mode === 'break' ? 'Break' : 'Focus'} ${mmss(left)} left`}>
+        <svg viewBox="0 0 80 80" aria-hidden="true">
+          <circle cx="40" cy="40" r={R} className="ring-bg" />
+          <circle cx="40" cy="40" r={R} className="ring-fg" strokeDasharray={C} strokeDashoffset={C * (1 - pct)} />
+        </svg>
+        <span>{mmss(left)}</span>
       </div>
-      <div className="actions">
-        <button className="primary" onClick={running ? pause : start}>{label}</button>
-        {(running || left !== FOCUS || t.mode === 'break') && <button className="ghost" onClick={reset}>Reset</button>}
+      <div className="timer-side">
+        <div className="label">{t.mode === 'break' ? '5 min break' : '25 min focus'}</div>
+        <div className="actions">
+          <button className="primary" onClick={running ? pause : start}><Icon name={running ? 'pause' : 'play'} size={16} />{label}</button>
+          {(running || left !== FOCUS || t.mode === 'break') && <button className="soft" onClick={reset}>Reset</button>}
+        </div>
       </div>
     </div>
   );

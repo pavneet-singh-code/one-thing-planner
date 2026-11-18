@@ -41,7 +41,7 @@ const steps = (v: unknown) => {
   return v.slice(0, 12).map((s) => ({ text: String((s as { text?: unknown })?.text ?? '').slice(0, 160), done: Boolean((s as { done?: unknown })?.done) }));
 };
 
-const TASK_COLS = `id, title, subject, due, remind_at as "remindAt", est, status, ord, steps, reminded,
+const TASK_COLS = `id, title, subject, notes, due, remind_at as "remindAt", est, status, ord, steps, reminded,
   created_at as "createdAt", done_at as "doneAt"`;
 
 /* ---------- errors ---------- */
@@ -96,12 +96,12 @@ app.post('/tasks', async (c) => {
     if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new BadRequest('id has invalid characters');
     const status = STATUSES.has(raw.status as string) ? raw.status : 'later';
     const [row] = await d.q(
-      `insert into tasks (id, title, subject, due, remind_at, est, status, ord)
-       values ($1,$2,$3,$4,$5,$6,$7,$8)
+      `insert into tasks (id, title, subject, due, remind_at, est, status, ord, notes)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        on conflict (id) do nothing
        returning ${TASK_COLS}`,
       [id, str(raw.title, 140, 'title', true), str(raw.subject, 40, 'subject'), dateStr(raw.due, 'due'),
-       isoTime(raw.remindAt, 'remindAt'), int(raw.est, 5, 600, 30), status, Number(raw.ord) || 0]);
+       isoTime(raw.remindAt, 'remindAt'), int(raw.est, 5, 600, 30), status, Number(raw.ord) || 0, str(raw.notes, 2000, 'notes')]);
     if (row) out.push(row);
   }
   return c.json({ tasks: out }, 201);
@@ -114,6 +114,7 @@ app.patch('/tasks/:id', async (c) => {
   const set = (col: string, v: unknown) => { vals.push(v); sets.push(`${col} = $${vals.length}`); };
   if ('title' in b) set('title', str(b.title, 140, 'title', true));
   if ('subject' in b) set('subject', str(b.subject, 40, 'subject'));
+  if ('notes' in b) set('notes', str(b.notes, 2000, 'notes'));
   if ('due' in b) set('due', dateStr(b.due, 'due'));
   if ('remindAt' in b) { set('remind_at', isoTime(b.remindAt, 'remindAt')); set('reminded', false); }
   if ('est' in b) set('est', int(b.est, 5, 600, 30));

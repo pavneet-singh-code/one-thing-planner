@@ -68,7 +68,7 @@ export function useStore() {
       return { tasks, todays, maxOrd: Math.max(0, ...todays.map((t) => t.ord)), minOrd: Math.min(0, ...todays.map((t) => t.ord)) };
     };
     return {
-      async add(items: { title: string; subject?: string; due?: string | null; remindAt?: string | null; est?: number; wantToday?: boolean }[]) {
+      async add(items: { title: string; subject?: string; notes?: string; due?: string | null; remindAt?: string | null; est?: number; wantToday?: boolean }[]) {
         const { todays, maxOrd } = cur();
         let free = TODAY_LIMIT - todays.length;
         const now = new Date().toISOString();
@@ -76,7 +76,7 @@ export function useStore() {
           const toToday = x.wantToday && free > 0;
           if (toToday) free--;
           return {
-            id: newId() + i, title: x.title, subject: x.subject ?? '', due: x.due || null, remindAt: x.remindAt || null,
+            id: newId() + i, title: x.title, subject: x.subject ?? '', notes: x.notes ?? '', due: x.due || null, remindAt: x.remindAt || null,
             est: x.est ?? 30, status: toToday ? 'today' : 'later', ord: toToday ? maxOrd + 1 + i : 0,
             steps: [], reminded: false, createdAt: now, doneAt: null,
           };
@@ -113,6 +113,12 @@ export function useStore() {
         try { await api.deleteTask(t.id); } catch (e) { fail(e); }
       },
       setSteps: (t: Task, steps: Task['steps']) => patch(t.id, { steps }),
+      edit(t: Task, p: Partial<Pick<Task, 'title' | 'subject' | 'notes' | 'due' | 'est' | 'remindAt' | 'steps'>>) {
+        const changed = Object.fromEntries(Object.entries(p).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(t[k as keyof Task])));
+        if (!Object.keys(changed).length) return;
+        if ('remindAt' in changed) (changed as Partial<Task>).reminded = false;
+        patch(t.id, changed);
+      },
       setReminder: (t: Task, remindAt: string | null) => patch(t.id, { remindAt, reminded: false }),
       async applyDayPlan(ids: string[]) {
         const { todays } = cur();
@@ -138,3 +144,8 @@ export function useStore() {
 }
 
 export type Store = ReturnType<typeof useStore>;
+
+/* ---------- display name (this device only) ---------- */
+const NAME = 'onething.name';
+export const getName = () => { try { return localStorage.getItem(NAME) ?? ''; } catch { return ''; } };
+export const setName = (n: string) => { try { localStorage.setItem(NAME, n); } catch { /* ignore */ } };

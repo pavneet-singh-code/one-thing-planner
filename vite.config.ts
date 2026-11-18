@@ -19,8 +19,8 @@ export default defineConfig({
         description: 'A study planner that keeps you on one task at a time.',
         start_url: '/',
         display: 'standalone',
-        background_color: '#11161d',
-        theme_color: '#11161d',
+        background_color: '#f1eeea',
+        theme_color: '#f1eeea',
         icons: [
           { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
