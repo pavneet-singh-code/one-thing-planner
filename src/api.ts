@@ -1,10 +1,18 @@
 export type Status = 'later' | 'today' | 'done';
+export type Kind = 'study' | 'exam' | 'placement' | 'deadline';
+export type Repeat = '' | 'daily' | 'weekdays' | 'weekly';
+export type SubjectKind = 'course' | 'exam' | 'placement';
+export interface Topic { title: string; done: boolean }
+export interface Subject { id: string; name: string; kind: SubjectKind; examDate: string | null; topics: Topic[]; fileName: string }
 export interface Step { text: string; done: boolean }
 export interface Task {
   id: string;
   title: string;
   subject: string;
   notes: string;
+  kind: Kind;
+  link: string;
+  repeat: Repeat;
   due: string | null;
   remindAt: string | null;
   est: number;
@@ -16,7 +24,7 @@ export interface Task {
   doneAt: string | null;
 }
 export interface FocusDay { day: string; minutes: number }
-export interface AppState { tasks: Task[]; focus: FocusDay[]; ai: boolean; push: boolean; vapidPublicKey: string }
+export interface AppState { tasks: Task[]; focus: FocusDay[]; subjects: Subject[]; ai: boolean; push: boolean; vapidPublicKey: string }
 
 const KEY = 'onething.key';
 export const getKey = () => { try { return localStorage.getItem(KEY) ?? ''; } catch { return ''; } };
@@ -56,6 +64,10 @@ export const api = {
   planGoal: (b: { goal: string; deadline: string; hoursPerDay: number; today: string }) =>
     call<{ summary: string; tasks: { title: string; date: string; minutes: number }[] }>('POST', '/ai/plan-goal', b),
   planDay: (b: { hours: number; today: string }) => call<{ pick: { id: string; why: string }[]; advice: string }>('POST', '/ai/plan-day', b),
+  saveSubject: (s: Subject) => call<{ subject: Subject }>('PUT', `/subjects/${encodeURIComponent(s.id)}`, s),
+  deleteSubject: (id: string) => call('DELETE', `/subjects/${encodeURIComponent(id)}`),
+  readSyllabus: (b: { pdf?: string; text?: string; subject: string; kind: SubjectKind; examDate: string | null; hoursPerDay: number; today: string; plan: boolean }) =>
+    call<{ topics: string[]; summary: string; tasks: { title: string; date: string; minutes: number }[] }>('POST', '/ai/syllabus', b),
   breakDown: (taskId: string) => call<{ steps: string[] }>('POST', '/ai/breakdown', { taskId }),
 };
 

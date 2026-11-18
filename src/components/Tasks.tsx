@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
 import { api, type Task } from '../api';
-import { addDays, dayNum, fmtClock, fmtShort, fmtTime, greeting, today, weekday, ymd } from '../dates';
+import { addDays, fmtShort, fmtTime, greeting, today, weekday, ymd } from '../dates';
+import { useDrag } from '../drag';
+import { kindLabel } from '../kinds';
 import { getName, TODAY_LIMIT, toast, type Store } from '../store';
 import { subjectClass } from '../subjects';
 import { FocusTimer } from './FocusTimer';
@@ -13,6 +15,7 @@ export function Chips({ t }: { t: Task }) {
   const td = today();
   return (
     <div className="meta">
+      {t.kind && t.kind !== 'study' && <span className={'tag k-' + t.kind}>{kindLabel(t.kind)}</span>}
       {t.subject && <span className={'tag ' + subjectClass(t.subject)}>{t.subject}</span>}
       {t.due && (
         <span className={'chip' + (t.status !== 'done' && t.due < td ? ' due-over' : t.due === td ? ' due-today' : '')}>
@@ -23,6 +26,8 @@ export function Chips({ t }: { t: Task }) {
       <span className="chip"><Icon name="clock" size={13} />{t.est} min</span>
       {t.remindAt && t.status !== 'done' && <span className="chip"><Icon name="bell" size={13} />{fmtTime(t.remindAt)}</span>}
       {t.steps.length > 0 && <span className="chip">{t.steps.filter((s) => s.done).length}/{t.steps.length} steps</span>}
+      {t.repeat && <span className="chip"><Icon name="repeat" size={13} />{t.repeat}</span>}
+      {t.link && <a className="chip linkchip" href={t.link} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}><Icon name="link" size={13} />Open link</a>}
     </div>
   );
 }
@@ -36,10 +41,10 @@ export function TaskRow({ t, store, lead, extra }: { t: Task; store: Store; lead
         <button className={'check' + (done ? ' on' : '')} aria-label={done ? `Reopen "${t.title}"` : `Mark "${t.title}" done`}
           onClick={() => (done ? store.actions.reopen(t) : store.actions.complete(t))}>{done && <Icon name="check" size={14} />}</button>
       )}
-      <button className="main" onClick={() => edit({ task: t })} aria-label={`Edit "${t.title}"`}>
+      <div className="main" role="button" tabIndex={0} onClick={() => edit({ task: t })} onKeyDown={(e) => { if (e.key === 'Enter') edit({ task: t }); }} aria-label={`Edit "${t.title}"`}>
         <span className="t">{t.title}</span>
         <Chips t={t} />
-      </button>
+      </div>
       <div className="btns">{extra}</div>
     </div>
   );
@@ -161,11 +166,18 @@ export function Greeting({ store }: { store: Store }) {
 /* ---------- Today's three ---------- */
 export function TodayList({ store, goTo }: { store: Store; goTo: (tab: string) => void }) {
   const { todays, actions } = store;
+  const drag = useDrag((id, target) => {
+    if (!target.startsWith('today:')) return;
+    const to = Math.min(Number(target.slice(6)), todays.length - 1);
+    const ids = todays.map((t) => t.id).filter((x) => x !== id);
+    ids.splice(to, 0, id);
+    actions.reorderToday(ids);
+  });
   return (
     <section className="card" aria-labelledby="todayLbl">
       <div className="section-head">
         <h2 id="todayLbl">Today’s three</h2>
-        <span className="muted small">Finish one before adding another.</span>
+        <span className="muted small">{todays.length > 1 ? 'Hold the dots to drag into a new order.' : 'Finish one before adding another.'}</span>
       </div>
       <div className="list">
         {Array.from({ length: TODAY_LIMIT }, (_, i) => {
@@ -178,51 +190,18 @@ export function TodayList({ store, goTo }: { store: Store; goTo: (tab: string) =
             </div>
           );
           return (
-            <TaskRow key={t.id} t={t} store={store} extra={<>
-              {i > 0 && <button className="soft sm" onClick={() => actions.makeNow(t)}>Now</button>}
-              <button className="soft sm" onClick={() => actions.park(t)}>Later</button>
-            </>} />
+            <div key={t.id} className="drag-row" data-drop={`today:${i}`}>
+              {todays.length > 1 && <span className="grip" aria-hidden="true" {...drag(t.id)}><Icon name="grip" size={16} /></span>}
+              <TaskRow t={t} store={store} extra={<>
+                {i > 0 && <button className="soft sm" onClick={() => actions.makeNow(t)}>Now</button>}
+                <button className="soft sm" onClick={() => actions.park(t)}>Later</button>
+              </>} />
+            </div>
           );
         })}
         {todays.slice(TODAY_LIMIT).map((t) => (
           <TaskRow key={t.id} t={t} store={store} extra={<button className="soft sm" onClick={() => actions.park(t)}>Later</button>} />
         ))}
-      </div>
-    </section>
-  );
-}
-
-/* ---------- Upcoming schedule strip ---------- */
-export function tasksOn(store: Store, day: string) {
-  return store.tasks.filter((t) => t.due === day || (!t.due && t.remindAt && ymd(new Date(t.remindAt)) === day));
-}
-
-export function Upcoming({ store, goTo }: { store: Store; goTo: (tab: string) => void }) {
-  const edit = useEditor();
-  const td = today();
-  const days = Array.from({ length: 7 }, (_, i) => addDays(td, i));
-  return (
-    <section className="card">
-      <div className="section-head">
-        <h2>Upcoming schedule</h2>
-        <button className="soft sm" onClick={() => goTo('calendar')}>Calendar <Icon name="right" size={14} /></button>
-      </div>
-      <div className="strip">
-        {days.map((day, i) => {
-          const items = tasksOn(store, day);
-          return (
-            <div className={'strip-day' + (i === 0 ? ' today' : '')} key={day}>
-              <div className="strip-head"><span>{weekday(day)}</span><b>{dayNum(day)}</b></div>
-              {items.map((t) => (
-                <button key={t.id} className={'event ' + subjectClass(t.subject) + (t.status === 'done' ? ' done' : '')} onClick={() => edit({ task: t })}>
-                  <span className="event-t">{t.title}</span>
-                  <span className="event-m">{t.remindAt && ymd(new Date(t.remindAt)) === day ? fmtClock(t.remindAt) : `${t.est} min`}</span>
-                </button>
-              ))}
-              <button className="add-slot" aria-label={`Add task on ${weekday(day)} ${dayNum(day)}`} onClick={() => edit({ preset: { due: day, wantToday: i === 0 } })}><Icon name="plus" size={14} /></button>
-            </div>
-          );
-        })}
       </div>
     </section>
   );
@@ -316,12 +295,30 @@ export function TasksPanel({ store }: { store: Store }) {
       </section>
 
       <details className="card">
-        <summary><h2 style={{ display: 'inline' }}>Done</h2> <span className="muted small">({dones.length})</span></summary>
+        <summary><h2 style={{ display: 'inline' }}>Done</h2> <span className="muted small">({dones.length}) · tap Revise to schedule a revision</span></summary>
         <div className="list" style={{ marginTop: 10 }}>
-          {dt.slice(0, 80).map((t) => <TaskRow key={t.id} t={t} store={store} />)}
+          {dt.slice(0, 80).map((t) => <TaskRow key={t.id} t={t} store={store} extra={<RevisePicker t={t} store={store} />} />)}
           {!dt.length && <p className="empty">Nothing finished yet.</p>}
         </div>
       </details>
+    </div>
+  );
+}
+
+/* ---------- Revision scheduling for finished tasks ---------- */
+const REVISE = [
+  { label: 'Tomorrow', days: [1] },
+  { label: 'In 3 days', days: [3] },
+  { label: 'In a week', days: [7] },
+  { label: '1 · 3 · 7 days', days: [1, 3, 7] },
+];
+export function RevisePicker({ t, store }: { t: Task; store: Store }) {
+  const [open, setOpen] = useState(false);
+  if (!open) return <button className="soft sm" onClick={() => setOpen(true)}><Icon name="repeat" size={14} />Revise</button>;
+  return (
+    <div className="revise" role="group" aria-label="Schedule a revision">
+      {REVISE.map((r) => <button key={r.label} className="soft sm" onClick={() => { store.actions.addRevisions(t, r.days); setOpen(false); }}>{r.label}</button>)}
+      <button className="icon-btn" aria-label="Cancel" onClick={() => setOpen(false)}><Icon name="x" size={14} /></button>
     </div>
   );
 }

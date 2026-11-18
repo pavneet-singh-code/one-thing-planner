@@ -1,65 +1,12 @@
 import { useEffect, useState } from 'react';
 import { api, getKey, setKey } from '../api';
-import { addDays, dayNum, fmtClock, fmtDay, fmtShort, startOfWeek, today, weekday, ymd } from '../dates';
+import { addDays, today } from '../dates';
 import { currentSubscription, disablePush, enablePush, pushSupported } from '../push';
 import { getName, setName, toast, type Store } from '../store';
-import { subjectClass } from '../subjects';
 import { Icon } from './Icon';
-import { useEditor } from './TaskEditor';
-import { TaskRow, tasksOn } from './Tasks';
-
-/* ---------- Calendar (week view) ---------- */
-export function CalendarPanel({ store }: { store: Store }) {
-  const edit = useEditor();
-  const td = today();
-  const [start, setStart] = useState(startOfWeek(td));
-  const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
-  const undated = store.laters.filter((t) => !t.due && !t.remindAt);
-  return (
-    <div className="page">
-      <section className="card">
-        <div className="section-head">
-          <h2>{fmtShort(start)} – {fmtShort(days[6])}</h2>
-          <div className="actions">
-            <button className="icon-btn" aria-label="Previous week" onClick={() => setStart(addDays(start, -7))}><Icon name="left" /></button>
-            <button className="soft sm" onClick={() => setStart(startOfWeek(td))}>This week</button>
-            <button className="icon-btn" aria-label="Next week" onClick={() => setStart(addDays(start, 7))}><Icon name="right" /></button>
-          </div>
-        </div>
-        <div className="cal">
-          {days.map((day) => {
-            const items = tasksOn(store, day);
-            const mins = items.filter((t) => t.status !== 'done').reduce((a, t) => a + t.est, 0);
-            return (
-              <div className={'cal-day' + (day === td ? ' today' : '') + (day < td ? ' past' : '')} key={day}>
-                <div className="cal-head">
-                  <span>{weekday(day)}</span><b>{dayNum(day)}</b>
-                  {mins > 0 && <small>{mins >= 60 ? `${Math.round(mins / 6) / 10}h` : `${mins}m`}</small>}
-                </div>
-                {items.map((t) => (
-                  <button key={t.id} className={'event ' + subjectClass(t.subject) + (t.status === 'done' ? ' done' : '')} onClick={() => edit({ task: t })}>
-                    <span className="event-t">{t.title}</span>
-                    <span className="event-m">{t.remindAt && ymd(new Date(t.remindAt)) === day ? fmtClock(t.remindAt) : `${t.est} min`}{t.subject ? ` · ${t.subject}` : ''}</span>
-                  </button>
-                ))}
-                {day >= td && <button className="add-slot" aria-label={`Add task on ${fmtDay(day)}`} onClick={() => edit({ preset: { due: day, wantToday: day === td } })}><Icon name="plus" size={14} /> Add</button>}
-              </div>
-            );
-          })}
-        </div>
-      </section>
-      {undated.length > 0 && (
-        <section className="card">
-          <div className="section-head"><h2>No date yet</h2><span className="muted small">Tap one to give it a day.</span></div>
-          <div className="list">{undated.map((t) => <TaskRow key={t.id} t={t} store={store} />)}</div>
-        </section>
-      )}
-    </div>
-  );
-}
+import { keepers, ProposalList, type Proposal } from './Proposal';
 
 /* ---------- AI ---------- */
-type Proposal = { title: string; date: string; minutes: number; keep: boolean };
 
 export function AiPanel({ store }: { store: Store }) {
   const [goal, setGoal] = useState('');
@@ -87,17 +34,16 @@ export function AiPanel({ store }: { store: Store }) {
     } catch (e) { toast((e as Error).message); }
     finally { setBusyGoal(false); }
   };
-  const keepers = plan ? plan.tasks.filter((t) => t.keep && t.title.trim()) : [];
+  const kept = plan ? keepers(plan.tasks) : [];
   const acceptPlan = async () => {
     if (!plan) return;
-    await store.actions.add(keepers.map((t) => ({
+    await store.actions.add(kept.map((t) => ({
       title: t.title.trim(), subject: subject.trim(), due: t.date || null, est: t.minutes,
       remindAt: remind && t.date ? new Date(t.date + 'T17:00').toISOString() : null,
     })));
     setPlan(null); setGoal('');
-    toast(`Added ${keepers.length} tasks to Later.`);
+    toast(`Added ${kept.length} tasks to Later.`);
   };
-  const upd = (i: number, p: Partial<Proposal>) => plan && setPlan({ ...plan, tasks: plan.tasks.map((x, j) => (j === i ? { ...x, ...p } : x)) });
 
   const planDay = async () => {
     setBusyDay(true); setDayPlan(null);
@@ -127,26 +73,10 @@ export function AiPanel({ store }: { store: Store }) {
         {plan && (
           <div className="proposal">
             {plan.summary && <p className="why" style={{ margin: 0 }}>{plan.summary}</p>}
-            {plan.tasks.map((t, i) => (
-              <div className={'prop' + (t.keep ? '' : ' off')} key={i}>
-                <input type="checkbox" aria-label="Keep this task" checked={t.keep} onChange={(e) => upd(i, { keep: e.target.checked })} />
-                <div className="prop-fields">
-                  <input className="bare strong" aria-label="Task" maxLength={140} value={t.title} placeholder="Task" onChange={(e) => upd(i, { title: e.target.value })} />
-                  <div className="prop-row">
-                    <input type="date" aria-label="Day" value={t.date} onChange={(e) => upd(i, { date: e.target.value })} />
-                    <label className="mins"><input type="number" aria-label="Minutes" min={5} max={600} step={5} value={t.minutes} onChange={(e) => upd(i, { minutes: Number(e.target.value) || 30 })} /> min</label>
-                  </div>
-                </div>
-                <button className="icon-btn" aria-label="Remove" onClick={() => setPlan({ ...plan, tasks: plan.tasks.filter((_, j) => j !== i) })}><Icon name="x" size={16} /></button>
-              </div>
-            ))}
-            <button className="soft sm" style={{ alignSelf: 'flex-start' }}
-              onClick={() => setPlan({ ...plan, tasks: [...plan.tasks, { title: '', date: plan.tasks.at(-1)?.date ?? today(), minutes: 30, keep: true }] })}>
-              <Icon name="plus" size={14} /> Add a task
-            </button>
+            <ProposalList tasks={plan.tasks} onChange={(tasks) => setPlan({ ...plan, tasks })} />
             <label className="check-line"><input type="checkbox" checked={remind} onChange={(e) => setRemind(e.target.checked)} /> Remind me at 5:00 pm on each task’s day</label>
             <div className="actions">
-              <button className="primary" disabled={!keepers.length} onClick={acceptPlan}>Add {keepers.length} tasks</button>
+              <button className="primary" disabled={!kept.length} onClick={acceptPlan}>Add {kept.length} tasks</button>
               <button className="soft" onClick={() => setPlan(null)}>Discard</button>
             </div>
           </div>

@@ -2,7 +2,7 @@
 import { Hono, type Context, type Next } from 'hono';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { db } from './db.js';
-import { aiEnabled, AiError, breakDown, planDay, planGoal } from './ai.js';
+import { aiEnabled, AiError, breakDown, planDay, planGoal, readSyllabus } from './ai.js';
 import { pushEnabled, pushPublicKey, runDueReminders, sendToAll } from './push.js';
 
 const app = new Hono().basePath('/api');
@@ -36,12 +36,28 @@ const int = (v: unknown, min: number, max: number, dflt: number) => {
   return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : dflt;
 };
 const STATUSES = new Set(['later', 'today', 'done']);
+const KINDS = new Set(['study', 'exam', 'placement', 'deadline']);
+const REPEATS = new Set(['', 'daily', 'weekdays', 'weekly']);
+const SUBJECT_KINDS = new Set(['course', 'exam', 'placement']);
+const kind = (v: unknown) => (KINDS.has(v as string) ? (v as string) : 'study');
+const repeat = (v: unknown) => (REPEATS.has((v ?? '') as string) ? ((v ?? '') as string) : '');
+const link = (v: unknown) => {
+  const s = str(v, 500, 'link');
+  if (s && !/^https?:\/\//i.test(s)) throw new BadRequest('link must start with http:// or https://');
+  return s;
+};
+const topics = (v: unknown) => {
+  if (!Array.isArray(v)) throw new BadRequest('topics must be a list');
+  return v.slice(0, 80).map((t) => ({ title: String((t as { title?: unknown })?.title ?? '').trim().slice(0, 160), done: Boolean((t as { done?: unknown })?.done) }))
+    .filter((t) => t.title);
+};
+const SUBJECT_COLS = `id, name, kind, exam_date as "examDate", topics, file_name as "fileName"`;
 const steps = (v: unknown) => {
   if (!Array.isArray(v)) throw new BadRequest('steps must be a list');
   return v.slice(0, 12).map((s) => ({ text: String((s as { text?: unknown })?.text ?? '').slice(0, 160), done: Boolean((s as { done?: unknown })?.done) }));
 };
 
-const TASK_COLS = `id, title, subject, notes, due, remind_at as "remindAt", est, status, ord, steps, reminded,
+const TASK_COLS = `id, title, subject, notes, kind, link, repeat, due, remind_at as "remindAt", est, status, ord, steps, reminded,
   created_at as "createdAt", done_at as "doneAt"`;
 
 /* ---------- errors ---------- */
@@ -81,14 +97,15 @@ app.get('/state', async (c) => {
     d.q(`select ${TASK_COLS} from tasks where status <> 'done' or done_at > now() - interval '60 days' order by created_at`),
     d.q(`select day, minutes from focus_log order by day desc limit 120`),
   ]);
-  return c.json({ tasks, focus, ai: aiEnabled(), push: pushEnabled(), vapidPublicKey: pushPublicKey() });
+  const subjects = await d.q(`select ${SUBJECT_COLS} from subjects order by created_at`);
+  return c.json({ tasks, focus, subjects, ai: aiEnabled(), push: pushEnabled(), vapidPublicKey: pushPublicKey() });
 });
 
 /* ---------- tasks ---------- */
 app.post('/tasks', async (c) => {
   const b = await c.req.json<Record<string, unknown>>();
   const list = Array.isArray(b.tasks) ? b.tasks : [b];
-  if (list.length > 30) throw new BadRequest('Too many tasks at once');
+  if (list.length > 60) throw new BadRequest('Too many tasks at once');
   const d = await db();
   const out = [];
   for (const raw of list as Record<string, unknown>[]) {
@@ -96,12 +113,12 @@ app.post('/tasks', async (c) => {
     if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new BadRequest('id has invalid characters');
     const status = STATUSES.has(raw.status as string) ? raw.status : 'later';
     const [row] = await d.q(
-      `insert into tasks (id, title, subject, due, remind_at, est, status, ord, notes)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      `insert into tasks (id, title, subject, due, remind_at, est, status, ord, notes, kind, link, repeat)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
        on conflict (id) do nothing
        returning ${TASK_COLS}`,
       [id, str(raw.title, 140, 'title', true), str(raw.subject, 40, 'subject'), dateStr(raw.due, 'due'),
-       isoTime(raw.remindAt, 'remindAt'), int(raw.est, 5, 600, 30), status, Number(raw.ord) || 0, str(raw.notes, 2000, 'notes')]);
+       isoTime(raw.remindAt, 'remindAt'), int(raw.est, 5, 600, 30), status, Number(raw.ord) || 0, str(raw.notes, 2000, 'notes'), kind(raw.kind), link(raw.link), repeat(raw.repeat)]);
     if (row) out.push(row);
   }
   return c.json({ tasks: out }, 201);
@@ -115,6 +132,9 @@ app.patch('/tasks/:id', async (c) => {
   if ('title' in b) set('title', str(b.title, 140, 'title', true));
   if ('subject' in b) set('subject', str(b.subject, 40, 'subject'));
   if ('notes' in b) set('notes', str(b.notes, 2000, 'notes'));
+  if ('kind' in b) set('kind', kind(b.kind));
+  if ('link' in b) set('link', link(b.link));
+  if ('repeat' in b) set('repeat', repeat(b.repeat));
   if ('due' in b) set('due', dateStr(b.due, 'due'));
   if ('remindAt' in b) { set('remind_at', isoTime(b.remindAt, 'remindAt')); set('reminded', false); }
   if ('est' in b) set('est', int(b.est, 5, 600, 30));
@@ -134,6 +154,32 @@ app.patch('/tasks/:id', async (c) => {
 
 app.delete('/tasks/:id', async (c) => {
   await (await db()).q('delete from tasks where id = $1', [c.req.param('id')]);
+  return c.json({ ok: true });
+});
+
+/* ---------- subjects ---------- */
+app.put('/subjects/:id', async (c) => {
+  const id = c.req.param('id');
+  if (!/^[A-Za-z0-9_-]{1,40}$/.test(id)) throw new BadRequest('id has invalid characters');
+  const b = await c.req.json<Record<string, unknown>>();
+  const name = str(b.name, 40, 'name', true);
+  const k = SUBJECT_KINDS.has(b.kind as string) ? (b.kind as string) : 'course';
+  const d = await db();
+  const [old] = await d.q<{ name: string }>('select name from subjects where id = $1', [id]);
+  const [clash] = await d.q('select 1 from subjects where name = $1 and id <> $2', [name, id]);
+  if (clash) throw new BadRequest(`There is already a subject called "${name}"`);
+  const [row] = await d.q(
+    `insert into subjects (id, name, kind, exam_date, topics, file_name) values ($1,$2,$3,$4,$5,$6)
+     on conflict (id) do update set name = excluded.name, kind = excluded.kind, exam_date = excluded.exam_date,
+       topics = excluded.topics, file_name = excluded.file_name
+     returning ${SUBJECT_COLS}`,
+    [id, name, k, dateStr(b.examDate, 'examDate'), JSON.stringify(topics(b.topics ?? [])), str(b.fileName, 200, 'fileName')]);
+  // Renaming a subject renames it on its tasks too.
+  if (old && old.name !== name) await d.q('update tasks set subject = $1 where subject = $2', [name, old.name]);
+  return c.json({ subject: row });
+});
+app.delete('/subjects/:id', async (c) => {
+  await (await db()).q('delete from subjects where id = $1', [c.req.param('id')]);
   return c.json({ ok: true });
 });
 
@@ -196,6 +242,25 @@ app.post('/ai/plan-goal', async (c) => {
     deadline: dateStr(b.deadline, 'deadline') ?? today,
     hoursPerDay: Math.min(12, Math.max(0.5, Number(b.hoursPerDay) || 2)),
     today,
+  }));
+});
+
+// Syllabus: a PDF (base64) or pasted text -> topics + a study plan up to the exam date.
+app.post('/ai/syllabus', async (c) => {
+  const b = await c.req.json<Record<string, unknown>>();
+  const today = dateStr(b.today, 'today') ?? new Date().toISOString().slice(0, 10);
+  const pdf = typeof b.pdf === 'string' ? b.pdf : '';
+  if (pdf.length > 4_300_000) throw new BadRequest('That PDF is too big. Use one under 3 MB (or paste the syllabus text).');
+  if (pdf && !/^[A-Za-z0-9+/=]+$/.test(pdf.slice(0, 200))) throw new BadRequest('pdf must be base64');
+  const text = str(b.text, 8000, 'text');
+  if (!pdf && !text) throw new BadRequest('Upload a syllabus PDF or paste the syllabus text.');
+  return c.json(await readSyllabus({
+    pdf, text, today,
+    subject: str(b.subject, 40, 'subject', true),
+    kind: SUBJECT_KINDS.has(b.kind as string) ? (b.kind as string) : 'course',
+    examDate: dateStr(b.examDate, 'examDate'),
+    hoursPerDay: Math.min(12, Math.max(0.5, Number(b.hoursPerDay) || 2)),
+    plan: b.plan !== false,
   }));
 });
 

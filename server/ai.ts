@@ -11,7 +11,8 @@ let client: GoogleGenAI | null = null;
 export const aiEnabled = () => Boolean(process.env.GEMINI_API_KEY);
 const model = () => process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
-async function askJson<T>(prompt: string, schema: object): Promise<T> {
+type Part = { text: string } | { inlineData: { mimeType: string; data: string } };
+async function askJson<T>(prompt: string | Part[], schema: object): Promise<T> {
   if (!aiEnabled()) throw new AiError('AI is off: set GEMINI_API_KEY on the server.', 503);
   client ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY!, apiVersion: 'v1beta' }); // JSON mode needs v1beta
   let text: string | undefined;
@@ -19,7 +20,7 @@ async function askJson<T>(prompt: string, schema: object): Promise<T> {
     try {
       const r = await client.models.generateContent({
         model: model(),
-        contents: prompt,
+        contents: typeof prompt === 'string' ? prompt : [{ role: 'user', parts: prompt }],
         config: { responseMimeType: 'application/json', responseJsonSchema: schema, temperature: 0.4 },
       });
       text = r.text;
@@ -82,6 +83,57 @@ Break the goal into study tasks:
     }));
   if (!tasks.length) throw new AiError('Gemini did not suggest any tasks. Try describing the goal in more detail.');
   return { summary: String(r.summary ?? ''), tasks };
+}
+
+export async function readSyllabus(p: { pdf: string; text: string; subject: string; kind: string; examDate: string | null; hoursPerDay: number; today: string; plan: boolean }) {
+  const end = p.examDate ?? addDaysIso(p.today, 21);
+  const focus = p.kind === 'placement'
+    ? 'This is placement preparation (aptitude, reasoning, verbal, technical rounds, interviews). Favour timed practice sets, previous-year style questions and mock tests.'
+    : p.kind === 'exam' ? 'This is an exam. Cover every topic once, then revise and do practice papers before the exam.' : '';
+  const prompt = `${COACH}
+Today is ${p.today}. ${p.examDate ? `The ${p.kind === 'placement' ? 'placement test / drive' : 'exam'} is on ${p.examDate}.` : `Aim to finish by ${end}.`} Available: about ${p.hoursPerDay} hours per day.
+Subject: "${p.subject}". ${focus}
+${p.pdf ? 'The attached PDF is the syllabus.' : `Syllabus text (between the markers):
+<<<
+${p.text}
+>>>`}
+1. "topics": list the syllabus topics in order, as short names (under 60 characters each, at most 40). Merge tiny sub-points into their topic.
+${p.plan ? `2. "tasks": a study plan from today to the day before ${end}. Each task is doable in one sitting (15-90 minutes), starts with a verb, names the topic and says exactly what to do. Under 90 characters. Never more than ${p.hoursPerDay} hours on one day. Leave room for revision of earlier topics and at least one full practice test near the end. At most 40 tasks.
+3. "summary": one sentence on the strategy.` : '2. "tasks": an empty list. "summary": one sentence describing the syllabus.'}`;
+  const parts: Part[] = p.pdf ? [{ inlineData: { mimeType: 'application/pdf', data: p.pdf } }, { text: prompt }] : [{ text: prompt }];
+  const r = await askJson<{ topics?: string[]; summary?: string; tasks?: PlannedTask[] }>(parts, {
+    type: 'object',
+    properties: {
+      topics: { type: 'array', items: { type: 'string' } },
+      summary: { type: 'string' },
+      tasks: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: { title: { type: 'string' }, date: { type: 'string', description: 'YYYY-MM-DD' }, minutes: { type: 'integer' } },
+          required: ['title', 'date', 'minutes'],
+        },
+      },
+    },
+    required: ['topics', 'summary', 'tasks'],
+  });
+  const topics = (r.topics ?? []).map(String).map((s) => s.trim().slice(0, 160)).filter(Boolean).slice(0, 80);
+  if (!topics.length) throw new AiError('Gemini could not find any topics in that syllabus. Is the PDF a scan? Try pasting the text instead.');
+  const tasks = (r.tasks ?? [])
+    .filter((t) => t && typeof t.title === 'string' && t.title.trim())
+    .slice(0, 50)
+    .map((t) => ({
+      title: t.title.trim().slice(0, 140),
+      date: /^\d{4}-\d{2}-\d{2}$/.test(t.date) ? t.date : '',
+      minutes: clampInt(t.minutes, 5, 240, 30),
+    }));
+  return { topics, summary: String(r.summary ?? ''), tasks };
+}
+
+function addDaysIso(s: string, n: number) {
+  const d = new Date(s + 'T12:00:00Z');
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
 }
 
 export async function planDay(p: { today: string; hours: number; tasks: { id: string; title: string; subject: string; due: string | null; est: number }[] }) {

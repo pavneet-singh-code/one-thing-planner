@@ -1,11 +1,13 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
-import type { Step, Task } from '../api';
+import type { Kind, Repeat, Step, Task } from '../api';
 import { fromLocalInput, toLocalInput } from '../dates';
 import { TODAY_LIMIT, toast, type Store } from '../store';
+import { KINDS, REPEATS } from '../kinds';
 import { Icon } from './Icon';
+import { RevisePicker } from './Tasks';
 
 /** What to open: an existing task, or a new one with some fields pre-filled. */
-export type EditRequest = { task: Task } | { preset: { due?: string | null; title?: string; wantToday?: boolean } };
+export type EditRequest = { task: Task } | { preset: { due?: string | null; title?: string; wantToday?: boolean; subject?: string; kind?: Kind } };
 export const EditContext = createContext<(r: EditRequest) => void>(() => {});
 export const useEditor = () => useContext(EditContext);
 
@@ -15,7 +17,10 @@ export function TaskEditor({ store, req, onClose }: { store: Store; req: EditReq
   const ref = useRef<HTMLDialogElement>(null);
 
   const [title, setTitle] = useState(existing?.title ?? preset.title ?? '');
-  const [subject, setSubject] = useState(existing?.subject ?? '');
+  const [subject, setSubject] = useState(existing?.subject ?? preset.subject ?? '');
+  const [kind, setKind] = useState<Kind>(existing?.kind ?? preset.kind ?? 'study');
+  const [link, setLink] = useState(existing?.link ?? '');
+  const [repeat, setRepeat] = useState<Repeat>(existing?.repeat ?? '');
   const [due, setDue] = useState(existing?.due ?? preset.due ?? '');
   const [est, setEst] = useState(existing?.est ?? 30);
   const [rem, setRem] = useState(toLocalInput(existing?.remindAt ?? null));
@@ -24,7 +29,7 @@ export function TaskEditor({ store, req, onClose }: { store: Store; req: EditReq
   const [newStep, setNewStep] = useState('');
   const [where, setWhere] = useState<'later' | 'today'>(preset.wantToday ? 'today' : 'later');
   const [confirmDel, setConfirmDel] = useState(false);
-  const subjects = [...new Set(store.tasks.map((t) => t.subject).filter(Boolean))];
+  const subjects = [...new Set([...store.subjects.map((s) => s.name), ...store.tasks.map((t) => t.subject)].filter(Boolean))];
 
   useEffect(() => {
     const d = ref.current;
@@ -36,7 +41,9 @@ export function TaskEditor({ store, req, onClose }: { store: Store; req: EditReq
   const save = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!title.trim()) return;
-    const fields = { title: title.trim(), subject: subject.trim(), due: due || null, est, remindAt: fromLocalInput(rem), notes: notes.trim(), steps: allSteps() };
+    if (link.trim() && !/^https?:\/\//i.test(link.trim())) { toast('Links must start with http:// or https://'); return; }
+    if (repeat && !due) { toast('Pick a due date for a repeating task.'); return; }
+    const fields = { kind, link: link.trim(), repeat, title: title.trim(), subject: subject.trim(), due: due || null, est, remindAt: fromLocalInput(rem), notes: notes.trim(), steps: allSteps() };
     if (existing) {
       store.actions.edit(existing, fields);
       toast('Saved.');
@@ -62,6 +69,11 @@ export function TaskEditor({ store, req, onClose }: { store: Store; req: EditReq
         <label className="f">Task
           <input required maxLength={140} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Solve 20 percentage problems from PDF 1" autoFocus={!existing} />
         </label>
+        <div className="f"><span>Type</span>
+          <div className="seg">
+            {KINDS.map((k) => <button type="button" key={k.id} title={k.hint} className={kind === k.id ? 'on' + (k.id !== 'study' ? ' k-' + k.id : '') : ''} onClick={() => setKind(k.id)}>{k.label}</button>)}
+          </div>
+        </div>
         <div className="grid">
           <label className="f wide">Subject
             <input maxLength={40} list="subjList" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="NALR" />
@@ -76,6 +88,14 @@ export function TaskEditor({ store, req, onClose }: { store: Store; req: EditReq
             </div>
           </label>
           <label className="f wide">Remind me at<input type="datetime-local" value={rem} onChange={(e) => setRem(e.target.value)} /></label>
+          <label className="f wide">Repeat
+            <select value={repeat} onChange={(e) => setRepeat(e.target.value as Repeat)}>
+              {REPEATS.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
+            </select>
+          </label>
+          <label className="f wide">Link <span className="muted" style={{ fontWeight: 400 }}>(test, meeting, form)</span>
+            <input type="url" maxLength={500} value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://…" />
+          </label>
         </div>
         <datalist id="subjList">{subjects.map((s) => <option key={s} value={s} />)}</datalist>
 
@@ -101,6 +121,10 @@ export function TaskEditor({ store, req, onClose }: { store: Store; req: EditReq
             </li>
           </ul>
         </div>
+
+        {existing?.status === 'done' && (
+          <div className="f"><span>Revise this</span><div><RevisePicker t={existing} store={store} /></div></div>
+        )}
 
         {!existing && (
           <div className="f"><span>Put it in</span>

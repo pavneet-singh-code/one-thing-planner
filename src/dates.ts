@@ -21,4 +21,14 @@ export const toLocalInput = (iso: string | null) => {
 /** <input type="datetime-local"> value (local) -> ISO string */
 export const fromLocalInput = (v: string) => (v ? new Date(v).toISOString() : null);
 export const mmss = (sec: number) => `${pad(Math.floor(sec / 60))}:${pad(sec % 60)}`;
+/** Next date for a repeating task, strictly after `from` and not before today. */
+export const nextRepeat = (from: string, rule: string) => {
+  const td = today();
+  let d = from;
+  do {
+    d = addDays(d, rule === 'weekly' ? 7 : 1);
+    if (rule === 'weekdays') while ([0, 6].includes(new Date(d + 'T12:00').getDay())) d = addDays(d, 1);
+  } while (d <= td);
+  return d;
+};
 export const greeting = () => { const h = new Date().getHours(); return h < 5 ? 'Up late' : h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; };

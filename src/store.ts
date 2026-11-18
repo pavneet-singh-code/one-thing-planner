@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, ApiError, newId, type AppState, type Task } from './api';
-import { today } from './dates';
+import { api, ApiError, newId, type AppState, type Kind, type Repeat, type Subject, type Task } from './api';
+import { addDays, nextRepeat, today, ymd } from './dates';
 
 /* ---------- toast ---------- */
 type ToastFn = (msg: string) => void;
@@ -58,7 +58,8 @@ export function useStore() {
     const laters = tasks.filter((t) => t.status === 'later')
       .sort((a, b) => (a.due ?? '9999').localeCompare(b.due ?? '9999') || a.createdAt.localeCompare(b.createdAt));
     const dones = tasks.filter((t) => t.status === 'done').sort((a, b) => (b.doneAt ?? '').localeCompare(a.doneAt ?? ''));
-    return { tasks, todays, laters, dones };
+    const subjects = state?.subjects ?? [];
+    return { tasks, todays, laters, dones, subjects };
   }, [state]);
 
   const actions = useMemo(() => {
@@ -67,8 +68,8 @@ export function useStore() {
       const todays = tasks.filter((t) => t.status === 'today').sort((a, b) => a.ord - b.ord);
       return { tasks, todays, maxOrd: Math.max(0, ...todays.map((t) => t.ord)), minOrd: Math.min(0, ...todays.map((t) => t.ord)) };
     };
-    return {
-      async add(items: { title: string; subject?: string; notes?: string; due?: string | null; remindAt?: string | null; est?: number; wantToday?: boolean }[]) {
+    const a = {
+      async add(items: { title: string; subject?: string; notes?: string; kind?: Kind; link?: string; repeat?: Repeat; due?: string | null; remindAt?: string | null; est?: number; wantToday?: boolean }[]) {
         const { todays, maxOrd } = cur();
         let free = TODAY_LIMIT - todays.length;
         const now = new Date().toISOString();
@@ -76,7 +77,7 @@ export function useStore() {
           const toToday = x.wantToday && free > 0;
           if (toToday) free--;
           return {
-            id: newId() + i, title: x.title, subject: x.subject ?? '', notes: x.notes ?? '', due: x.due || null, remindAt: x.remindAt || null,
+            id: newId() + i, title: x.title, subject: x.subject ?? '', notes: x.notes ?? '', kind: x.kind ?? 'study', link: x.link ?? '', repeat: x.repeat ?? '', due: x.due || null, remindAt: x.remindAt || null,
             est: x.est ?? 30, status: toToday ? 'today' : 'later', ord: toToday ? maxOrd + 1 + i : 0,
             steps: [], reminded: false, createdAt: now, doneAt: null,
           };
@@ -105,7 +106,53 @@ export function useStore() {
       },
       complete(t: Task) {
         patch(t.id, { status: 'done', doneAt: new Date().toISOString() });
-        toast('Done. Nice work.');
+        if (t.repeat) {
+          // Repeating task: queue the next one, same details, fresh steps.
+          const due = nextRepeat(t.due ?? today(), t.repeat);
+          const shift = t.due ? (new Date(due + 'T12:00').getTime() - new Date(t.due + 'T12:00').getTime()) : 0;
+          const remindAt = t.remindAt ? new Date(new Date(t.remindAt).getTime() + (shift || 86400000)).toISOString() : null;
+          a.add([{ title: t.title, subject: t.subject, notes: t.notes, kind: t.kind, link: t.link, repeat: t.repeat, est: t.est, due, remindAt }])
+            .then(([n]) => { if (t.steps.length) patch(n.id, { steps: t.steps.map((s) => ({ ...s, done: false })) }); });
+          toast(`Done. Next one is on ${new Date(due + 'T12:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}.`);
+        } else toast('Done. Nice work.');
+      },
+      /** Move a task to another day; its reminder moves by the same number of days. */
+      moveToDay(t: Task, day: string) {
+        if (t.due === day) return;
+        const from = t.due ?? (t.remindAt ? ymd(new Date(t.remindAt)) : null);
+        let remindAt = t.remindAt;
+        if (remindAt && from) {
+          const delta = new Date(day + 'T12:00').getTime() - new Date(from + 'T12:00').getTime();
+          remindAt = new Date(new Date(remindAt).getTime() + delta).toISOString();
+        }
+        patch(t.id, { due: day, ...(remindAt !== t.remindAt ? { remindAt, reminded: false } : {}) });
+      },
+      reorderToday(ids: string[]) {
+        ids.forEach((id, i) => patch(id, { ord: i + 1 }));
+      },
+      /** Schedule revision tasks for a finished task, `offsets` days from today. */
+      async addRevisions(t: Task, offsets: number[]) {
+        const td = today();
+        const base = t.title.replace(/^Revise( \(\d\/\d\))?: /, '');
+        await a.add(offsets.map((o, i) => ({
+          title: `Revise${offsets.length > 1 ? ` (${i + 1}/${offsets.length})` : ''}: ${base}`.slice(0, 140),
+          subject: t.subject, notes: t.notes, est: Math.min(30, Math.max(10, Math.round(t.est / 2))),
+          due: addDays(td, o), remindAt: new Date(addDays(td, o) + 'T17:00').toISOString(),
+        })));
+        toast(offsets.length > 1 ? `${offsets.length} revisions scheduled.` : 'Revision scheduled.');
+      },
+      async saveSubject(s: Subject) {
+        const old = stateRef.current?.subjects.find((x) => x.id === s.id);
+        setState((st) => st && {
+          ...st,
+          subjects: st.subjects.some((x) => x.id === s.id) ? st.subjects.map((x) => (x.id === s.id ? s : x)) : [...st.subjects, s],
+          tasks: old && old.name !== s.name ? st.tasks.map((t) => (t.subject === old.name ? { ...t, subject: s.name } : t)) : st.tasks,
+        });
+        try { await api.saveSubject(s); } catch (e) { fail(e); throw e; }
+      },
+      async deleteSubject(s: Subject) {
+        setState((st) => st && { ...st, subjects: st.subjects.filter((x) => x.id !== s.id) });
+        try { await api.deleteSubject(s.id); } catch (e) { fail(e); }
       },
       reopen: (t: Task) => patch(t.id, { status: 'later', doneAt: null }),
       async remove(t: Task) {
@@ -113,7 +160,7 @@ export function useStore() {
         try { await api.deleteTask(t.id); } catch (e) { fail(e); }
       },
       setSteps: (t: Task, steps: Task['steps']) => patch(t.id, { steps }),
-      edit(t: Task, p: Partial<Pick<Task, 'title' | 'subject' | 'notes' | 'due' | 'est' | 'remindAt' | 'steps'>>) {
+      edit(t: Task, p: Partial<Pick<Task, 'title' | 'subject' | 'notes' | 'due' | 'est' | 'remindAt' | 'steps' | 'kind' | 'link' | 'repeat'>>) {
         const changed = Object.fromEntries(Object.entries(p).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(t[k as keyof Task])));
         if (!Object.keys(changed).length) return;
         if ('remindAt' in changed) (changed as Partial<Task>).reminded = false;
@@ -138,6 +185,7 @@ export function useStore() {
         try { await api.logFocus(day, minutes); } catch (e) { fail(e); }
       },
     };
+    return a;
   }, [patch, fail]);
 
   return { state, error, load, ...derived, actions };

@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { getName, useStore, useToast } from './store';
-import { Activity, Greeting, NowHero, TasksPanel, TodayList, Upcoming } from './components/Tasks';
-import { AiPanel, CalendarPanel, KeyGate, SettingsPanel } from './components/Panels';
+import { Activity, Greeting, NowHero, TasksPanel, TodayList } from './components/Tasks';
+import { AiPanel, KeyGate, SettingsPanel } from './components/Panels';
+import { CalendarPanel, Upcoming } from './components/Schedule';
+import { SubjectsPanel } from './components/Subjects';
 import { EditContext, TaskEditor, type EditRequest } from './components/TaskEditor';
 import { Icon, type IconName } from './components/Icon';
 
@@ -9,10 +11,11 @@ const TABS: { id: string; label: string; icon: IconName }[] = [
   { id: 'home', label: 'Home', icon: 'home' },
   { id: 'tasks', label: 'Tasks', icon: 'list' },
   { id: 'calendar', label: 'Calendar', icon: 'calendar' },
+  { id: 'subjects', label: 'Subjects', icon: 'book' },
   { id: 'ai', label: 'AI plan', icon: 'sparkle' },
-  { id: 'settings', label: 'Settings', icon: 'settings' },
 ];
-const isTab = (t: string | null): t is string => !!t && TABS.some((x) => x.id === t);
+const PAGES = [...TABS.map((t) => t.id), 'settings'];
+const isTab = (t: string | null): t is string => !!t && PAGES.includes(t);
 
 export default function App() {
   const store = useStore();
@@ -66,7 +69,7 @@ export default function App() {
           </nav>
           <div className="top-right">
             <button className="round ghosted" aria-label="New task" onClick={() => setEditing({ preset: {} })}><Icon name="plus" /></button>
-            <button className="avatar" aria-label="Settings" onClick={() => setTab('settings')}>{(name || 'Me').slice(0, 1).toUpperCase()}</button>
+            <button className={'avatar' + (tab === 'settings' ? ' on' : '')} aria-label="Settings" title="Settings" onClick={() => setTab('settings')}>{(name || 'Me').slice(0, 1).toUpperCase()}</button>
           </div>
         </header>
 
@@ -85,7 +88,8 @@ export default function App() {
             </div>
           )}
           {tab === 'tasks' && <TasksPanel store={store} />}
-          {tab === 'calendar' && <CalendarPanel store={store} />}
+          {tab === 'calendar' && <CalendarPanel store={store} goTo={setTab} />}
+          {tab === 'subjects' && <SubjectsPanel store={store} />}
           {tab === 'ai' && <AiPanel store={store} />}
           {tab === 'settings' && <SettingsPanel store={store} />}
         </main>

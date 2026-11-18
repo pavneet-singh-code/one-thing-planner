@@ -22,6 +22,19 @@ create table if not exists tasks (
   done_at     timestamptz
 );
 alter table tasks add column if not exists notes text not null default '';
+alter table tasks add column if not exists kind text not null default 'study';   -- study | exam | placement | deadline
+alter table tasks add column if not exists link text not null default '';
+alter table tasks add column if not exists repeat text not null default '';      -- '' | daily | weekdays | weekly
+
+create table if not exists subjects (
+  id          text primary key,
+  name        text not null unique,
+  kind        text not null default 'course',   -- course | exam | placement
+  exam_date   text,                             -- YYYY-MM-DD
+  topics      jsonb not null default '[]'::jsonb,
+  file_name   text not null default '',
+  created_at  timestamptz not null default now()
+);
 create index if not exists tasks_remind_idx on tasks (remind_at) where reminded = false;
 
 create table if not exists focus_log (
