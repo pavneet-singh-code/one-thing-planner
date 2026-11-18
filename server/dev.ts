@@ -1,0 +1,6 @@
+// Local API server for `npm run dev` (Vite proxies /api here).
+import { serve } from '@hono/node-server';
+import app from './app.js';
+
+const port = Number(process.env.API_PORT) || 8787;
+serve({ fetch: app.fetch, port }, () => console.log(`[api] http://localhost:${port}/api`));

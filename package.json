@@ -1,0 +1,44 @@
+{
+  "name": "one-thing-planner",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c blue,green \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "tsx watch --env-file-if-exists=.env server/dev.ts",
+    "dev:web": "vite",
+    "build": "tsc -p . && tsc -p tsconfig.sw.json && vite build",
+    "typecheck": "tsc -p . && tsc -p tsconfig.sw.json",
+    "vapid": "web-push generate-vapid-keys",
+    "icons": "node scripts/icons.mjs"
+  },
+  "dependencies": {
+    "@google/genai": "^3.4.0",
+    "@hono/node-server": "^2.1.9",
+    "hono": "^4.13.19",
+    "postgres": "^4.1.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "web-push": "^4.0.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.16",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/web-push": "^3.6.4",
+    "@vitejs/plugin-react": "^6.3.0",
+    "concurrently": "^10.0.7",
+    "sharp": "^0.35.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "vite-plugin-pwa": "^2.0.0",
+    "workbox-core": "^7.4.1",
+    "workbox-precaching": "^7.4.1",
+    "workbox-routing": "^7.4.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

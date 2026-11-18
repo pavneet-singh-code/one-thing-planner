@@ -1,0 +1,570 @@
+<title>One Thing Planner</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: one narrow study column — the single "Now" task on top, at most three for today, everything else parked in Later. */
+:root{
+  --paper:#f4f6f9; --sheet:#ffffff; --ink:#18212e; --muted:#5b6778; --rule:#dde2ea;
+  --mark:#ffe14d; --mark-ink:#1b1a10; --act:#1f5fbf; --act-ink:#ffffff; --act-soft:#e3ecfa;
+  --ok:#1d7a4a; --warn:#b5560b; --bad:#b42335;
+  --f-display:"Bricolage Grotesque",ui-sans-serif,system-ui,sans-serif;
+  --f-body:"Atkinson Hyperlegible",ui-sans-serif,system-ui,sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+  --r:10px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --paper:#11161d; --sheet:#19202a; --ink:#e8edf4; --muted:#9aa6b6; --rule:#2a3442;
+  --mark:#f2d33b; --mark-ink:#1b1a10; --act:#7fb0ff; --act-ink:#0d1726; --act-soft:#1d2b40;
+  --ok:#5fd193; --warn:#f0a15c; --bad:#ff8090; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --paper:#11161d; --sheet:#19202a; --ink:#e8edf4; --muted:#9aa6b6; --rule:#2a3442;
+  --mark:#f2d33b; --mark-ink:#1b1a10; --act:#7fb0ff; --act-ink:#0d1726; --act-soft:#1d2b40;
+  --ok:#5fd193; --warn:#f0a15c; --bad:#ff8090; color-scheme:dark}
+
+*{box-sizing:border-box}
+body{background:var(--paper);color:var(--ink);font:16px/1.5 var(--f-body);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 48px}
+.wrap{max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:22px}
+h1,h2,h3{font-family:var(--f-display);text-wrap:balance;margin:0;line-height:1.15}
+h1{font-size:1.6rem;font-weight:700;letter-spacing:-.01em}
+h2{font-size:1.05rem;font-weight:700}
+.label{font-size:.72rem;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);font-weight:700}
+.muted{color:var(--muted)}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer;border:1px solid var(--rule);background:var(--sheet);border-radius:8px;padding:7px 12px;font-weight:700;font-size:.9rem}
+button:hover{border-color:var(--muted)}
+button.primary{background:var(--act);color:var(--act-ink);border-color:var(--act)}
+button.ghost{background:transparent;border-color:transparent;color:var(--muted);padding:6px 8px}
+button.ghost:hover{color:var(--ink);background:var(--act-soft)}
+button:disabled{opacity:.5;cursor:default}
+:focus-visible{outline:3px solid var(--act);outline-offset:2px}
+input,select,textarea{background:var(--sheet);border:1px solid var(--rule);border-radius:8px;padding:8px 10px;width:100%;min-width:0}
+textarea{resize:vertical;min-height:70px}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:.82rem;color:var(--muted);font-weight:700;min-width:0}
+
+/* header */
+header{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap}
+.hl{background:linear-gradient(transparent 55%,var(--mark) 55%,var(--mark) 92%,transparent 92%);color:inherit;padding:0 .1em}
+.stats{display:flex;gap:18px;font-variant-numeric:tabular-nums}
+.stat b{display:block;font-family:var(--f-display);font-size:1.3rem;line-height:1}
+.stat span{font-size:.75rem;color:var(--muted)}
+
+/* banners */
+.banner{border-radius:var(--r);padding:12px 14px;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;background:var(--mark);color:var(--mark-ink)}
+.banner button{background:transparent;border-color:color-mix(in srgb,var(--mark-ink) 40%,transparent);color:var(--mark-ink)}
+.note{font-size:.85rem;color:var(--muted);border-left:3px solid var(--rule);padding-left:10px}
+
+/* Now card */
+.now{background:var(--sheet);border:1px solid var(--rule);border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:14px}
+.now-title{font-family:var(--f-display);font-size:1.7rem;font-weight:700;line-height:1.15;overflow-wrap:anywhere}
+.now-title span{background:linear-gradient(transparent 60%,var(--mark) 60%,var(--mark) 90%,transparent 90%);box-decoration-break:clone;-webkit-box-decoration-break:clone}
+.timer-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.timer{font-family:var(--f-mono);font-size:2.4rem;font-variant-numeric:tabular-nums;letter-spacing:-.02em;min-width:5.2ch}
+.timer.break{color:var(--ok)}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+.steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.steps li{display:flex;gap:10px;align-items:flex-start}
+.steps input{width:auto;margin-top:4px}
+.steps li.d span{text-decoration:line-through;color:var(--muted)}
+.empty-now{color:var(--muted)}
+
+/* task rows */
+.list{display:flex;flex-direction:column;background:var(--sheet);border:1px solid var(--rule);border-radius:var(--r)}
+.row{display:grid;grid-template-columns:28px 1fr auto;gap:10px;align-items:center;padding:10px 12px;border-top:1px solid var(--rule)}
+.row:first-child{border-top:0}
+.slot{font-family:var(--f-mono);font-size:.85rem;color:var(--muted);text-align:center}
+.row .main{min-width:0}
+.row .t{font-weight:700;overflow-wrap:anywhere}
+.meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:3px;font-size:.78rem;color:var(--muted)}
+.chip{border:1px solid var(--rule);border-radius:99px;padding:0 8px;white-space:nowrap}
+.chip.due-over{border-color:var(--bad);color:var(--bad)}
+.chip.due-today{border-color:var(--warn);color:var(--warn)}
+.chip.rem{border-style:dashed}
+.row .btns{display:flex;gap:2px}
+.row.placeholder .t{color:var(--muted);font-weight:400;font-style:italic}
+.check{width:22px;height:22px;border-radius:50%;border:2px solid var(--muted);background:transparent;padding:0;margin:0 auto}
+.check:hover{border-color:var(--ok);background:color-mix(in srgb,var(--ok) 15%,transparent)}
+
+/* tabs */
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--rule)}
+.tab{border:0;border-bottom:3px solid transparent;border-radius:0;background:transparent;padding:8px 12px;color:var(--muted)}
+.tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--mark)}
+.panel{display:flex;flex-direction:column;gap:14px;padding-top:14px}
+
+/* forms */
+.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.grid .wide{grid-column:span 2}
+.grid .full{grid-column:1/-1}
+@media (max-width:560px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.card{background:var(--sheet);border:1px solid var(--rule);border-radius:var(--r);padding:16px;display:flex;flex-direction:column;gap:12px}
+
+/* week */
+.week{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
+.day{background:var(--sheet);border:1px solid var(--rule);border-radius:8px;padding:8px;min-height:110px;display:flex;flex-direction:column;gap:5px;min-width:0}
+.day.today{border-color:var(--act)}
+.day h3{font-size:.8rem;font-family:var(--f-body);font-weight:700;color:var(--muted)}
+.day .it{font-size:.78rem;line-height:1.3;background:var(--act-soft);border-radius:5px;padding:3px 5px;overflow-wrap:anywhere}
+.day .it.done{text-decoration:line-through;opacity:.6}
+@media (max-width:640px){.week{grid-template-columns:1fr}.day{min-height:0}}
+
+/* AI */
+.ai-out{white-space:pre-wrap}
+.proposal{display:flex;flex-direction:column;gap:6px}
+.prop{display:grid;grid-template-columns:auto 1fr;gap:10px;align-items:start;padding:8px 10px;border:1px solid var(--rule);border-radius:8px}
+.prop input{width:auto;margin-top:4px}
+.why{font-size:.85rem;color:var(--muted)}
+.thinking{color:var(--muted);font-style:italic}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--paper);padding:9px 16px;border-radius:99px;font-size:.9rem;z-index:20;max-width:calc(100% - 32px)}
+@media (prefers-reduced-motion:no-preference){.now{transition:box-shadow .2s}.now.pulse{box-shadow:0 0 0 4px var(--mark)}}
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <div class="label" id="dateLabel"></div>
+      <h1>One <span class="hl">Thing</span> at a time</h1>
+    </div>
+    <div class="stats">
+      <div class="stat"><b id="sDone">0/0</b><span>done today</span></div>
+      <div class="stat"><b id="sMin">0</b><span>min focused</span></div>
+      <div class="stat"><b id="sStreak">0</b><span>day streak</span></div>
+    </div>
+  </header>
+
+  <div id="remBanner" class="banner" hidden>
+    <div><b>Reminder:</b> <span id="remText"></span></div>
+    <div class="actions"><button id="remFocus">Focus on it now</button><button id="remSnooze">Snooze 10 min</button><button id="remClose">Dismiss</button></div>
+  </div>
+  <div id="storeNote" class="note" hidden></div>
+
+  <!-- NOW -->
+  <section class="now" id="nowCard" aria-labelledby="nowLbl">
+    <div class="label" id="nowLbl">Now — your one thing</div>
+    <div id="nowBody"></div>
+  </section>
+
+  <!-- TODAY -->
+  <section aria-labelledby="todayLbl" style="display:flex;flex-direction:column;gap:8px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap">
+      <h2 id="todayLbl">Today’s three</h2>
+      <span class="muted" style="font-size:.85rem">Three is the limit. Finish one before adding another.</span>
+    </div>
+    <div class="list" id="todayList"></div>
+  </section>
+
+  <!-- TABS -->
+  <section>
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" id="tab-add" aria-selected="true" data-tab="add">Add task</button>
+      <button class="tab" role="tab" id="tab-later" aria-selected="false" data-tab="later">Later <span id="laterCount" class="muted"></span></button>
+      <button class="tab" role="tab" id="tab-week" aria-selected="false" data-tab="week">Week</button>
+      <button class="tab" role="tab" id="tab-ai" aria-selected="false" data-tab="ai">Ask Claude</button>
+    </div>
+
+    <div class="panel" id="p-add" role="tabpanel">
+      <form id="addForm" class="card">
+        <div class="grid">
+          <label class="f full">What do you need to do?<input id="fTitle" required maxlength="140" placeholder="e.g. Solve 15 integration problems from Ch. 7"></label>
+          <label class="f wide">Subject<input id="fSubject" maxlength="40" placeholder="Maths" list="subjList"></label>
+          <label class="f">Due date<input id="fDue" type="date"></label>
+          <label class="f">Est. minutes<input id="fEst" type="number" min="5" max="600" step="5" value="30"></label>
+          <label class="f wide">Remind me at<input id="fRem" type="datetime-local"></label>
+          <label class="f wide">Put it in<select id="fWhere"><option value="later">Later</option><option value="today">Today (if a slot is free)</option></select></label>
+        </div>
+        <datalist id="subjList"></datalist>
+        <div class="actions"><button class="primary" type="submit">Add task</button></div>
+      </form>
+    </div>
+
+    <div class="panel" id="p-later" role="tabpanel" hidden>
+      <div class="list" id="laterList"></div>
+      <details>
+        <summary class="muted" style="cursor:pointer">Done (<span id="doneCount">0</span>)</summary>
+        <div class="list" id="doneList" style="margin-top:8px"></div>
+      </details>
+    </div>
+
+    <div class="panel" id="p-week" role="tabpanel" hidden>
+      <div class="week" id="weekGrid"></div>
+      <div class="card">
+        <div><h2>Reminders on your phone or laptop</h2>
+        <p class="muted" style="margin:4px 0 0">This page can only remind you while it is open. To get alerts when it’s closed, save your reminders as a calendar file and open it with Google Calendar or Outlook.</p></div>
+        <div class="actions"><button id="icsAll">Save upcoming reminders (.ics)</button></div>
+      </div>
+    </div>
+
+    <div class="panel" id="p-ai" role="tabpanel" hidden>
+      <div id="aiOff" class="note" hidden>Claude isn’t available in this view, so the planning tools are off. Everything else works.</div>
+      <div class="card" id="aiGoalCard">
+        <div><h2>Break a big goal into tasks</h2><p class="muted" style="margin:4px 0 0">Tell Claude the goal and the deadline. It proposes small tasks spread across the days; you pick which to keep.</p></div>
+        <div class="grid">
+          <label class="f full">Goal<textarea id="gGoal" maxlength="800" placeholder="e.g. Physics mid-term on chapters 4–7: kinematics, laws of motion, work & energy, rotation. I'm weak at rotation."></textarea></label>
+          <label class="f">Deadline<input id="gDate" type="date"></label>
+          <label class="f">Hours per day<input id="gHours" type="number" min="0.5" max="12" step="0.5" value="2"></label>
+          <label class="f wide">Subject<input id="gSubject" maxlength="40" placeholder="Physics" list="subjList"></label>
+        </div>
+        <div class="actions"><button class="primary" id="gGo">Make a plan</button><button id="gStop" hidden>Stop</button></div>
+        <div id="gOut"></div>
+      </div>
+      <div class="card">
+        <div><h2>Pick today’s three for me</h2><p class="muted" style="margin:4px 0 0">Claude looks at deadlines and estimates in your Later list and picks what matters most today.</p></div>
+        <div class="grid"><label class="f wide">Time I have today (hours)<input id="dHours" type="number" min="0.5" max="14" step="0.5" value="3"></label></div>
+        <div class="actions"><button class="primary" id="dGo">Plan my day</button></div>
+        <div id="dOut"></div>
+      </div>
+    </div>
+  </section>
+</div>
+<div id="toast" class="toast" hidden></div>
+
+<script>
+(() => {
+'use strict';
+/* ---------- utils ---------- */
+const $ = s => document.querySelector(s);
+const el = (tag, attrs = {}, ...kids) => { const e = document.createElement(tag); for (const [k, v] of Object.entries(attrs)) { if (k === 'class') e.className = v; else if (k.startsWith('on')) e.addEventListener(k.slice(2), v); else if (v !== false && v != null) e.setAttribute(k, v === true ? '' : v); } for (const k of kids) if (k != null) e.append(k); return e; };
+const pad = n => String(n).padStart(2, '0');
+const ymd = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const today = () => ymd(new Date());
+const addDays = (s, n) => { const d = new Date(s + 'T12:00'); d.setDate(d.getDate() + n); return ymd(d); };
+const fmtDay = s => new Date(s + 'T12:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+const fmtTime = s => new Date(s).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+const uid = () => 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+let toastT; const toast = m => { const t = $('#toast'); t.textContent = m; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, 2600); };
+
+/* ---------- state ---------- */
+let tasks = [];          // {id,title,subject,due,remindAt,est,status,order,steps,reminded,createdAt,doneAt}
+let profile = { focusLog: {}, doneLog: {} };
+let store = null;        // {put(task), del(id), saveProfile()}
+
+/* ---------- storage: db per-user, fallback to this browser ---------- */
+const LS = 'onething.v1';
+function lsLoad() { try { const j = JSON.parse(localStorage.getItem(LS) || 'null'); if (j) { tasks = j.tasks || []; profile = Object.assign(profile, j.profile || {}); } } catch {} }
+function lsSave() { try { localStorage.setItem(LS, JSON.stringify({ tasks, profile })); } catch {} }
+const localStore = { put: async () => lsSave(), del: async () => lsSave(), saveProfile: async () => lsSave() };
+
+async function initStore() {
+  const note = $('#storeNote');
+  if (!window.claude) { lsLoad(); store = localStore; note.textContent = 'Saving to this browser only.'; note.hidden = false; render(); return; }
+  const [db, user] = await Promise.all([claude.use('db'), claude.use('user')]);
+  const id = user ? await user.id() : null;
+  if (!db || !id) { lsLoad(); store = localStore; note.textContent = 'Sign in to Claude to keep your tasks across devices. For now they are saved in this browser only.'; note.hidden = false; render(); return; }
+  const base = db.doc(`data/users/${id}/profile`);
+  const col = base.collection('tasks');
+  const pending = new Map(); // one write at a time per doc
+  const write = (key, fn) => { const p = (pending.get(key) || Promise.resolve()).then(fn).catch(e => { if (e && e.code === 'quota_exceeded') toast('Storage is full. Delete some done tasks.'); else if (e && e.code === 'invalid_argument') toast('This view is read-only.'); else toast('Could not save. Check your connection.'); }); pending.set(key, p); return p; };
+  store = {
+    put: t => write(t.id, () => { const { id: _, ...body } = t; return col.doc(t.id).set(body); }),
+    del: id => write(id, () => col.doc(id).delete()),
+    saveProfile: () => write('__p', () => base.set(profile)),
+  };
+  const timer = setTimeout(() => { note.textContent = 'Can’t reach your saved tasks yet. Changes will sync when the connection returns.'; note.hidden = false; }, 10000);
+  base.onSnapshot(s => { if (s.exists) profile = Object.assign({ focusLog: {}, doneLog: {} }, structuredClone(s.data())); render(); }, () => {});
+  col.onSnapshot(s => {
+    if (!s.metadata.fromCache) { clearTimeout(timer); note.hidden = true; }
+    tasks = s.docs.map(d => ({ id: d.id, ...structuredClone(d.data()) }));
+    render();
+  }, e => { clearTimeout(timer); note.textContent = 'Lost the connection to your saved tasks. Reload the page to reconnect.'; note.hidden = false; });
+}
+
+/* ---------- derived ---------- */
+const todays = () => tasks.filter(t => t.status === 'today').sort((a, b) => (a.order || 0) - (b.order || 0));
+const laters = () => tasks.filter(t => t.status === 'later').sort((a, b) => (a.due || '9999').localeCompare(b.due || '9999') || (a.createdAt || 0) - (b.createdAt || 0));
+const dones = () => tasks.filter(t => t.status === 'done').sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0));
+const maxOrder = () => Math.max(0, ...todays().map(t => t.order || 0));
+
+function streak() {
+  const log = profile.doneLog || {}; let n = 0, d = today();
+  if (!log[d]) d = addDays(d, -1);
+  while (log[d]) { n++; d = addDays(d, -1); }
+  return n;
+}
+
+/* ---------- actions ---------- */
+function upsert(t) { const i = tasks.findIndex(x => x.id === t.id); if (i >= 0) tasks[i] = t; else tasks.push(t); store.put(t); render(); }
+function addTask(fields) {
+  const t = { id: uid(), title: fields.title.trim(), subject: (fields.subject || '').trim(), due: fields.due || '', remindAt: fields.remindAt || '', est: Number(fields.est) || 30, status: 'later', order: 0, steps: [], reminded: false, createdAt: Date.now(), doneAt: 0 };
+  if (fields.where === 'today' && todays().length < 3) { t.status = 'today'; t.order = maxOrder() + 1; }
+  upsert(t); return t;
+}
+function moveToday(t) {
+  if (todays().length >= 3) { toast('Today already has three. Finish or park one first.'); return; }
+  upsert({ ...t, status: 'today', order: maxOrder() + 1 });
+}
+function park(t) { upsert({ ...t, status: 'later' }); }
+function makeNow(t) { const min = Math.min(0, ...todays().map(x => x.order || 0)); if (t.status !== 'today' && todays().length >= 3) { const last = todays().at(-1); upsert({ ...last, status: 'later' }); } upsert({ ...t, status: 'today', order: min - 1 }); }
+function complete(t) {
+  upsert({ ...t, status: 'done', doneAt: Date.now() });
+  const d = today(); profile.doneLog = { ...(profile.doneLog || {}), [d]: (profile.doneLog?.[d] || 0) + 1 }; store.saveProfile();
+  if (timer.taskId === t.id) resetTimer();
+  toast('Done. Nice work.'); chime(880);
+}
+function reopen(t) { upsert({ ...t, status: 'later', doneAt: 0 }); }
+function remove(t) { tasks = tasks.filter(x => x.id !== t.id); store.del(t.id); render(); }
+function swapNow() { const td = todays(); if (td.length < 2) return; upsert({ ...td[0], order: maxOrder() + 1 }); }
+
+/* ---------- focus timer (runs only while the page is open) ---------- */
+const timer = { mode: 'focus', left: 25 * 60, running: false, h: null, taskId: null };
+function resetTimer() { clearInterval(timer.h); Object.assign(timer, { mode: 'focus', left: 25 * 60, running: false, h: null, taskId: null }); renderTimer(); }
+function toggleTimer(taskId) {
+  if (timer.running) { clearInterval(timer.h); timer.running = false; renderTimer(); return; }
+  timer.taskId = taskId; timer.running = true; const end = Date.now() + timer.left * 1000;
+  timer.h = setInterval(() => {
+    timer.left = Math.max(0, Math.round((end - Date.now()) / 1000));
+    if (timer.left === 0) {
+      clearInterval(timer.h); timer.running = false; chime(660); setTimeout(() => chime(880), 250);
+      if (timer.mode === 'focus') { const d = today(); profile.focusLog = { ...(profile.focusLog || {}), [d]: (profile.focusLog?.[d] || 0) + 25 }; store.saveProfile(); timer.mode = 'break'; timer.left = 5 * 60; toast('25 minutes done. Take a 5 minute break.'); render(); }
+      else { timer.mode = 'focus'; timer.left = 25 * 60; toast('Break over. Back to your one thing.'); }
+    }
+    renderTimer();
+  }, 250);
+  renderTimer();
+}
+function renderTimer() {
+  const t = $('#timer'); if (!t) return;
+  t.textContent = `${pad(Math.floor(timer.left / 60))}:${pad(timer.left % 60)}`;
+  t.classList.toggle('break', timer.mode === 'break');
+  const b = $('#timerBtn'); if (b) b.textContent = timer.running ? 'Pause' : (timer.mode === 'break' ? 'Start break' : (timer.left < 1500 ? 'Resume' : 'Start 25 min focus'));
+  const m = $('#timerMode'); if (m) m.textContent = timer.mode === 'break' ? 'Break' : 'Focus';
+}
+let actx;
+function chime(f) { try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); const o = actx.createOscillator(), g = actx.createGain(); o.frequency.value = f; o.type = 'sine'; g.gain.setValueAtTime(.0001, actx.currentTime); g.gain.exponentialRampToValueAtTime(.25, actx.currentTime + .02); g.gain.exponentialRampToValueAtTime(.0001, actx.currentTime + .6); o.connect(g).connect(actx.destination); o.start(); o.stop(actx.currentTime + .65); } catch {} }
+
+/* ---------- reminders ---------- */
+let remTask = null;
+function checkReminders() {
+  if (remTask) return;
+  const now = Date.now();
+  const due = tasks.find(t => t.status !== 'done' && t.remindAt && !t.reminded && new Date(t.remindAt).getTime() <= now);
+  if (!due) return;
+  remTask = due; $('#remText').textContent = due.title; $('#remBanner').hidden = false; chime(740); setTimeout(() => chime(990), 200);
+  upsert({ ...due, reminded: true });
+}
+$('#remClose').onclick = () => { $('#remBanner').hidden = true; remTask = null; checkReminders(); };
+$('#remSnooze').onclick = () => { if (remTask) { const d = new Date(Date.now() + 10 * 60000); const t = tasks.find(x => x.id === remTask.id); if (t) upsert({ ...t, remindAt: `${ymd(d)}T${pad(d.getHours())}:${pad(d.getMinutes())}`, reminded: false }); toast('Snoozed for 10 minutes.'); } $('#remBanner').hidden = true; remTask = null; };
+$('#remFocus').onclick = () => { const t = remTask && tasks.find(x => x.id === remTask.id); if (t) makeNow(t); $('#remBanner').hidden = true; remTask = null; window.scrollTo({ top: 0, behavior: 'smooth' }); };
+setInterval(checkReminders, 20000);
+
+/* ---------- calendar export (.ics) ---------- */
+let downloads = null;
+const icsEsc = s => String(s).replace(/[\\;,]/g, m => '\\' + m).replace(/\n/g, '\\n');
+const icsDate = d => `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}00Z`;
+function icsFor(list) {
+  const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//One Thing Planner//EN', 'CALSCALE:GREGORIAN'];
+  for (const t of list) {
+    const start = new Date(t.remindAt); const end = new Date(start.getTime() + (t.est || 30) * 60000);
+    lines.push('BEGIN:VEVENT', `UID:${t.id}@onething`, `DTSTAMP:${icsDate(new Date())}`, `DTSTART:${icsDate(start)}`, `DTEND:${icsDate(end)}`,
+      `SUMMARY:${icsEsc((t.subject ? t.subject + ': ' : '') + t.title)}`, 'BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${icsEsc(t.title)}`, 'TRIGGER:PT0M', 'END:VALARM', 'END:VEVENT');
+  }
+  lines.push('END:VCALENDAR'); return lines.join('\r\n');
+}
+async function saveIcs(list, name) {
+  if (!list.length) { toast('No upcoming reminders. Add a "Remind me at" time to a task first.'); return; }
+  if (!downloads) { toast('Saving files isn’t available in this view.'); return; }
+  try { await downloads.save({ filename: name, data: icsFor(list) }); toast('Saved. Open the file to add it to your calendar.'); }
+  catch (e) { if (e && e.code !== 'declined') toast('Could not save the calendar file.'); }
+}
+$('#icsAll').onclick = () => saveIcs(tasks.filter(t => t.status !== 'done' && t.remindAt && new Date(t.remindAt) > new Date()), 'study-reminders.ics');
+
+/* ---------- render ---------- */
+function chips(t) {
+  const m = el('div', { class: 'meta' });
+  if (t.subject) m.append(el('span', { class: 'chip' }, t.subject));
+  if (t.due) { const td = today(); const cls = t.due < td ? 'chip due-over' : t.due === td ? 'chip due-today' : 'chip'; m.append(el('span', { class: cls }, t.due < td ? `overdue · ${fmtDay(t.due)}` : t.due === td ? 'due today' : `due ${fmtDay(t.due)}`)); }
+  if (t.est) m.append(el('span', { class: 'chip' }, `${t.est} min`));
+  if (t.remindAt && t.status !== 'done') m.append(el('span', { class: 'chip rem' }, `⏰ ${fmtTime(t.remindAt)}`));
+  return m;
+}
+function render() {
+  const td = todays(), lt = laters(), dn = dones(), d = today();
+  $('#dateLabel').textContent = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+  const doneToday = dn.filter(t => t.doneAt && ymd(new Date(t.doneAt)) === d).length;
+  $('#sDone').textContent = `${doneToday}/${doneToday + td.length}`;
+  $('#sMin').textContent = profile.focusLog?.[d] || 0;
+  $('#sStreak').textContent = streak();
+  $('#subjList').replaceChildren(...[...new Set(tasks.map(t => t.subject).filter(Boolean))].map(s => el('option', { value: s })));
+
+  // NOW
+  const now = td[0]; const body = $('#nowBody');
+  if (!now) {
+    body.replaceChildren(el('div', { class: 'empty-now' },
+      el('p', { style: 'margin:0 0 10px' }, tasks.length ? 'Nothing picked for today. Choose one task from Later, or let Claude pick today’s three.' : 'No tasks yet. Add your first one below, or describe a goal and let Claude break it into steps.'),
+      el('div', { class: 'actions' },
+        el('button', { class: 'primary', onclick: () => showTab(tasks.length ? 'later' : 'add') }, tasks.length ? 'Pick from Later' : 'Add a task'),
+        el('button', { onclick: () => showTab('ai') }, tasks.length ? 'Plan my day with Claude' : 'Plan a goal with Claude'),
+        !tasks.length ? el('button', { class: 'ghost', onclick: loadExamples }, 'Load example tasks') : null)));
+  } else {
+    if (timer.taskId && timer.taskId !== now.id && !timer.running) resetTimer();
+    const steps = el('ul', { class: 'steps' }, ...(now.steps || []).map((s, i) => el('li', { class: s.done ? 'd' : '' },
+      el('input', { type: 'checkbox', id: `st-${now.id}-${i}`, checked: !!s.done, 'aria-label': s.text, onchange: e => { const st = now.steps.map((x, j) => j === i ? { ...x, done: e.target.checked } : x); upsert({ ...now, steps: st }); } }),
+      el('span', {}, s.text))));
+    body.replaceChildren(
+      el('div', { class: 'now-title' }, el('span', {}, now.title)), chips(now),
+      el('div', { class: 'timer-row' },
+        el('div', {}, el('div', { class: 'label', id: 'timerMode' }, 'Focus'), el('div', { class: 'timer', id: 'timer', role: 'timer', 'aria-live': 'off' }, '25:00')),
+        el('div', { class: 'actions' },
+          el('button', { class: 'primary', id: 'timerBtn', onclick: () => toggleTimer(now.id) }, 'Start 25 min focus'),
+          el('button', { onclick: () => complete(now) }, '✓ Done'),
+          el('button', { class: 'ghost', onclick: () => breakDown(now), id: 'stuckBtn', hidden: !sampleFn }, 'Stuck? Break it down'),
+          td.length > 1 ? el('button', { class: 'ghost', onclick: swapNow }, 'Do another first') : null)),
+      now.steps?.length ? steps : null,
+      el('div', { id: 'stuckOut', class: 'thinking', hidden: true }));
+    renderTimer();
+  }
+
+  // TODAY list (3 slots)
+  const tl = $('#todayList'); tl.replaceChildren();
+  for (let i = 0; i < 3; i++) {
+    const t = td[i];
+    if (!t) { tl.append(el('div', { class: 'row placeholder' }, el('div', { class: 'slot' }, i + 1), el('div', { class: 'main' }, el('div', { class: 't' }, 'Empty slot')), el('button', { class: 'ghost', onclick: () => showTab('later') }, 'Pick'))); continue; }
+    tl.append(el('div', { class: 'row' },
+      el('button', { class: 'check', title: 'Mark done', 'aria-label': `Mark "${t.title}" done`, onclick: () => complete(t) }),
+      el('div', { class: 'main' }, el('div', { class: 't' }, (i === 0 ? '▶ ' : '') + t.title), chips(t)),
+      el('div', { class: 'btns' }, i > 0 ? el('button', { class: 'ghost', onclick: () => makeNow(t), title: 'Make this the one thing' }, 'Now') : null, el('button', { class: 'ghost', onclick: () => park(t) }, 'Later'))));
+  }
+  for (const t of td.slice(3)) tl.append(el('div', { class: 'row' }, el('div', { class: 'slot' }, '+'), el('div', { class: 'main' }, el('div', { class: 't' }, t.title), el('div', { class: 'meta' }, 'Over the limit')), el('button', { class: 'ghost', onclick: () => park(t) }, 'Later')));
+
+  // LATER
+  $('#laterCount').textContent = lt.length ? `(${lt.length})` : '';
+  const ll = $('#laterList');
+  ll.replaceChildren(...(lt.length ? lt.map(t => el('div', { class: 'row' },
+    el('button', { class: 'check', 'aria-label': `Mark "${t.title}" done`, title: 'Mark done', onclick: () => complete(t) }),
+    el('div', { class: 'main' }, el('div', { class: 't' }, t.title), chips(t)),
+    el('div', { class: 'btns' }, el('button', { class: 'ghost', onclick: () => moveToday(t) }, '→ Today'), el('button', { class: 'ghost', onclick: () => remove(t), 'aria-label': `Delete "${t.title}"`, title: 'Delete' }, '✕'))))
+    : [el('div', { class: 'row placeholder' }, el('div'), el('div', { class: 'main' }, el('div', { class: 't' }, 'Nothing parked. New tasks land here.')), el('div'))]));
+  $('#doneCount').textContent = dn.length;
+  $('#doneList').replaceChildren(...dn.slice(0, 50).map(t => el('div', { class: 'row' }, el('div', { class: 'slot' }, '✓'), el('div', { class: 'main' }, el('div', { class: 't', style: 'text-decoration:line-through;color:var(--muted)' }, t.title)), el('div', { class: 'btns' }, el('button', { class: 'ghost', onclick: () => reopen(t) }, 'Undo'), el('button', { class: 'ghost', onclick: () => remove(t), 'aria-label': 'Delete' }, '✕')))));
+
+  // WEEK
+  const wg = $('#weekGrid'); wg.replaceChildren();
+  for (let i = 0; i < 7; i++) {
+    const day = addDays(d, i);
+    const items = tasks.filter(t => (t.due === day) || (t.remindAt && t.remindAt.slice(0, 10) === day && t.due !== day));
+    wg.append(el('div', { class: 'day' + (i === 0 ? ' today' : '') }, el('h3', {}, i === 0 ? 'Today' : fmtDay(day)),
+      ...(items.length ? items.map(t => el('div', { class: 'it' + (t.status === 'done' ? ' done' : '') }, t.title)) : [el('div', { class: 'muted', style: 'font-size:.78rem' }, 'Free')])));
+  }
+  checkReminders();
+}
+
+/* ---------- tabs ---------- */
+function showTab(name) {
+  for (const b of document.querySelectorAll('.tab')) b.setAttribute('aria-selected', String(b.dataset.tab === name));
+  for (const p of ['add', 'later', 'week', 'ai']) $('#p-' + p).hidden = p !== name;
+  try { localStorage.setItem('onething.tab', name); } catch {}
+}
+for (const b of document.querySelectorAll('.tab')) b.onclick = () => showTab(b.dataset.tab);
+try { const s = localStorage.getItem('onething.tab'); if (s) showTab(s); } catch {}
+
+/* ---------- add form ---------- */
+$('#addForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const title = $('#fTitle').value.trim(); if (!title) return;
+  const t = addTask({ title, subject: $('#fSubject').value, due: $('#fDue').value, remindAt: $('#fRem').value, est: $('#fEst').value, where: $('#fWhere').value });
+  toast(t.status === 'today' ? 'Added to today.' : ($('#fWhere').value === 'today' ? 'Today is full, so it went to Later.' : 'Added to Later.'));
+  $('#fTitle').value = ''; $('#fRem').value = ''; $('#fTitle').focus();
+});
+
+function loadExamples() {
+  const d = today();
+  [{ title: 'Example: Revise Newton’s laws notes (Ch. 5)', subject: 'Physics', due: addDays(d, 1), est: 40 },
+   { title: 'Example: 15 practice problems on integration by parts', subject: 'Maths', due: addDays(d, 2), est: 50 },
+   { title: 'Example: Read and summarise history chapter 3', subject: 'History', due: addDays(d, 4), est: 30 }]
+    .forEach((x, i) => addTask({ ...x, where: i === 0 ? 'today' : 'later' }));
+  toast('Added three example tasks. Delete them whenever you like.');
+}
+
+/* ---------- Claude ---------- */
+let sampleFn = null;
+const errCopy = c => ({ not_granted: 'You didn’t allow Claude for this page, so planning is off.', sampling_disabled: 'Claude isn’t available for this account.', rate_limited: 'Too many requests right now. Try again in a minute.', session_expired: 'Sign in to Claude again, then retry.', invalid_json: 'Claude’s answer came back in the wrong shape. Try again.', refused: 'Claude couldn’t help with that. Try rewording the goal.' }[c] || 'Something went wrong reaching Claude. Try again.');
+function aiGone(code) { if (['not_granted', 'sampling_disabled', 'not_declared', 'capability_disabled', 'capability_removed'].includes(code)) { sampleFn = null; $('#aiOff').hidden = false; for (const b of ['#gGo', '#dGo']) $(b).disabled = true; render(); } }
+
+let gCtl;
+$('#gStop').onclick = () => gCtl?.abort();
+$('#gGo').onclick = async () => {
+  const goal = $('#gGoal').value.trim(); if (!goal) { $('#gGoal').focus(); return; }
+  const deadline = $('#gDate').value || addDays(today(), 7); const hours = $('#gHours').value || 2; const subject = $('#gSubject').value.trim();
+  const out = $('#gOut'); out.replaceChildren(el('div', { class: 'thinking' }, 'Thinking… (this can take up to a minute)'));
+  $('#gGo').disabled = true; $('#gStop').hidden = false; gCtl = new AbortController();
+  const prompt = `You are a study coach for a student who tends to start too many things and finish none. Break their goal into small, concrete study tasks.
+Today is ${today()}. Deadline: ${deadline}. Available time: about ${hours} hours per day.
+Goal: """${goal}"""
+Rules:
+- Each task must be specific and doable in one sitting (15–90 minutes), start with a verb, and say exactly what to do (which chapter, how many problems, etc.).
+- Spread tasks across days from today to the day before the deadline; never more than ${hours} hours of tasks on one day. Include at least one review/practice-test task near the end.
+- At most 14 tasks. Keep titles under 90 characters.
+Reply with only a JSON object: {"summary": "one sentence on the strategy", "tasks": [{"title": string, "date": "YYYY-MM-DD", "minutes": number}]}`;
+  try {
+    const r = await sampleFn.json(prompt, { signal: gCtl.signal, cache: false });
+    const list = Array.isArray(r?.tasks) ? r.tasks.filter(x => x && x.title).slice(0, 20) : [];
+    if (!list.length) throw { code: 'invalid_json' };
+    const box = el('div', { class: 'proposal' });
+    if (r.summary) box.append(el('p', { class: 'why', style: 'margin:0' }, String(r.summary)));
+    list.forEach((x, i) => box.append(el('label', { class: 'prop' }, el('input', { type: 'checkbox', checked: true, id: `gp-${i}`, 'data-i': i }),
+      el('div', {}, el('div', { style: 'font-weight:700' }, String(x.title)), el('div', { class: 'meta' }, el('span', { class: 'chip' }, /^\d{4}-\d{2}-\d{2}$/.test(x.date) ? fmtDay(x.date) : 'no date'), el('span', { class: 'chip' }, `${Number(x.minutes) || 30} min`))))));
+    const remToggle = el('label', { class: 'prop' }, el('input', { type: 'checkbox', id: 'gp-rem', checked: true }), el('div', {}, 'Remind me at 5:00 pm on each task’s day'));
+    box.append(remToggle, el('div', { class: 'actions' }, el('button', { class: 'primary', onclick: () => {
+      const withRem = $('#gp-rem').checked; let n = 0;
+      box.querySelectorAll('input[data-i]').forEach(cb => { if (!cb.checked) return; const x = list[+cb.dataset.i]; const date = /^\d{4}-\d{2}-\d{2}$/.test(x.date) ? x.date : ''; addTask({ title: String(x.title).slice(0, 140), subject, due: date, est: Number(x.minutes) || 30, remindAt: withRem && date ? `${date}T17:00` : '', where: 'later' }); n++; });
+      out.replaceChildren(el('p', { style: 'margin:0' }, `Added ${n} tasks to Later. Each day, move that day’s tasks into Today.`)); toast(`Added ${n} tasks.`);
+    } }, 'Add selected tasks'), el('button', { class: 'ghost', onclick: () => out.replaceChildren() }, 'Discard')));
+    out.replaceChildren(box);
+  } catch (e) { out.replaceChildren(e?.code === 'cancelled' ? '' : el('p', { class: 'note' }, errCopy(e?.code))); aiGone(e?.code); }
+  finally { $('#gGo').disabled = !sampleFn; $('#gStop').hidden = true; }
+};
+
+$('#dGo').onclick = async () => {
+  const pool = [...todays(), ...laters()];
+  const out = $('#dOut');
+  if (!pool.length) { out.replaceChildren(el('p', { class: 'note' }, 'Add some tasks first, then Claude can choose between them.')); return; }
+  const hours = $('#dHours').value || 3;
+  out.replaceChildren(el('div', { class: 'thinking' }, 'Thinking…')); $('#dGo').disabled = true;
+  const rows = pool.slice(0, 60).map(t => ({ id: t.id, title: t.title, subject: t.subject || undefined, due: t.due || undefined, minutes: t.est }));
+  const prompt = `You help a student who overcommits pick what to study today. Today is ${today()}. They have about ${hours} hours.
+Their open tasks (JSON): ${JSON.stringify(rows)}
+Pick at most 3 tasks (fewer if time is short) that fit in the time, prioritising overdue and soonest-due work, then balance subjects. Order them: first = do first.
+Reply with only JSON: {"pick": [{"id": string, "why": "under 15 words"}], "advice": "one short encouraging sentence"}`;
+  try {
+    const r = await sampleFn.json(prompt, { modelTier: 'quick', cache: false });
+    const picks = (Array.isArray(r?.pick) ? r.pick : []).map(p => ({ t: tasks.find(x => x.id === String(p.id)), why: String(p.why || '') })).filter(p => p.t).slice(0, 3);
+    if (!picks.length) throw { code: 'invalid_json' };
+    out.replaceChildren(el('div', { class: 'proposal' },
+      ...picks.map((p, i) => el('div', { class: 'prop', style: 'grid-template-columns:28px 1fr' }, el('div', { class: 'slot' }, i + 1), el('div', {}, el('div', { style: 'font-weight:700' }, p.t.title), el('div', { class: 'why' }, p.why)))),
+      r.advice ? el('p', { class: 'why', style: 'margin:0' }, String(r.advice)) : null,
+      el('div', { class: 'actions' }, el('button', { class: 'primary', onclick: () => {
+        const keep = new Set(picks.map(p => p.t.id));
+        for (const t of todays()) if (!keep.has(t.id)) upsert({ ...t, status: 'later' });
+        picks.forEach((p, i) => { const cur = tasks.find(x => x.id === p.t.id); upsert({ ...cur, status: 'today', order: i + 1 }); });
+        out.replaceChildren(el('p', { style: 'margin:0' }, 'Today is set. Start with the first one.')); window.scrollTo({ top: 0, behavior: 'smooth' });
+      } }, 'Use this plan'), el('button', { class: 'ghost', onclick: () => out.replaceChildren() }, 'Discard'))));
+  } catch (e) { out.replaceChildren(el('p', { class: 'note' }, errCopy(e?.code))); aiGone(e?.code); }
+  finally { $('#dGo').disabled = !sampleFn; }
+};
+
+async function breakDown(t) {
+  const out = $('#stuckOut'); const btn = $('#stuckBtn'); if (!out) return;
+  out.hidden = false; out.textContent = 'Thinking…'; btn.disabled = true;
+  const prompt = `A student is stuck starting this study task: "${t.title}"${t.subject ? ` (subject: ${t.subject})` : ''}. Break it into 3 to 6 tiny steps, each doable in 5–15 minutes, starting with the easiest possible first step so they can begin right now. Each step under 80 characters, starting with a verb.
+Reply with only a JSON array of strings.`;
+  try {
+    const r = await sampleFn.json(prompt, { modelTier: 'quick' });
+    const steps = (Array.isArray(r) ? r : []).map(String).filter(Boolean).slice(0, 8);
+    if (!steps.length) throw { code: 'invalid_json' };
+    const cur = tasks.find(x => x.id === t.id) || t;
+    upsert({ ...cur, steps: steps.map(text => ({ text: text.slice(0, 120), done: false })) });
+    toast('Steps added. Just do the first one.');
+  } catch (e) { out.textContent = errCopy(e?.code); aiGone(e?.code); }
+  finally { const b = $('#stuckBtn'); if (b) b.disabled = false; }
+}
+
+/* ---------- boot ---------- */
+$('#gDate').value = addDays(today(), 7);
+render();
+initStore();
+if (window.claude) {
+  claude.use('sample').then(s => { sampleFn = s; if (!s) { $('#aiOff').hidden = false; $('#gGo').disabled = $('#dGo').disabled = true; } render(); });
+  claude.use('downloads').then(d => { downloads = d; if (!d) $('#icsAll').disabled = true; });
+} else { $('#aiOff').hidden = false; $('#gGo').disabled = $('#dGo').disabled = true; $('#icsAll').disabled = true; }
+setInterval(() => { const l = $('#dateLabel'); if (l && !timer.running) render(); }, 60000);
+})();
+</script>
