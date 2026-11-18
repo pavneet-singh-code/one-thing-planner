@@ -56,6 +56,7 @@ export default function App() {
 
   return (
     <EditContext.Provider value={setEditing}>
+      <DesktopModeBanner />
       <div className="shell">
         <header className="topbar">
           <button className="brand" onClick={() => setTab('home')}><span className="logo" aria-hidden="true">1</span>One Thing</button>
@@ -99,5 +100,22 @@ export default function App() {
         {toastMsg && <div className="toast" role="status">{toastMsg}</div>}
       </div>
     </EditContext.Provider>
+  );
+}
+
+/** Chrome's "Desktop site" on a phone squeezes the laptop layout onto the screen. Spot it and say how to turn it off. */
+function DesktopModeBanner() {
+  const [hidden, setHidden] = useState(false);
+  const phoneInDesktopMode = typeof window !== 'undefined'
+    && window.matchMedia('(pointer: coarse)').matches
+    && screen.width < 700 && window.innerWidth > screen.width * 1.4;
+  if (!phoneInDesktopMode || hidden) return null;
+  const scale = window.innerWidth / screen.width; // make the banner readable despite the zoom-out
+  return (
+    <div className="desk-banner" role="alert" style={{ fontSize: `${Math.round(15 * scale)}px` }}>
+      <b>Chrome is showing the desktop version.</b>
+      <span>Tap <b>⋮</b> (top right) and untick <b>Desktop site</b> to get the phone layout.</span>
+      <button className="soft" style={{ fontSize: 'inherit', minHeight: 0, padding: '0.4em 1em' }} onClick={() => setHidden(true)}>OK</button>
+    </div>
   );
 }
