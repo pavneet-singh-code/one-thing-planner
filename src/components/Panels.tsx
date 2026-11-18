@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, getKey, setKey, type Task } from '../api';
+import { api, getKey, newId, setKey, type Task } from '../api';
 import { addDays, today } from '../dates';
 import { currentSubscription, disablePush, enablePush, pushSupported } from '../push';
 import { getName, setName, toast, type Store } from '../store';
@@ -38,7 +38,7 @@ export function AiPanel({ store }: { store: Store }) {
     setBusyGoal(true); setPlan(null); setJustAdded(null);
     try {
       const r = await api.planGoal({ goal, deadline, hoursPerDay: hours, today: today() });
-      setPlan({ summary: r.summary, tasks: fromAi(r.tasks, { subject: subject.trim(), time: '17:00' }) });
+      setPlan({ summary: r.summary, rules: r.rules, tasks: fromAi(r.tasks, { subject: subject.trim(), time: '17:00' }) });
     } catch (e) { toast((e as Error).message); }
     finally { setBusyGoal(false); }
   };
@@ -46,6 +46,13 @@ export function AiPanel({ store }: { store: Store }) {
   const acceptPlan = async () => {
     if (!plan || !checkLinks(plan.tasks)) return;
     await store.actions.add(kept.map(toFields));
+    // track it as a project so its progress shows on Home and Subjects
+    const names = [...new Set(kept.map((t) => t.subject.trim()).filter(Boolean))];
+    for (const name of names) {
+      if (!store.subjects.some((s) => s.name === name)) {
+        await store.actions.saveSubject({ id: newId(), name, kind: 'project', examDate: deadline || null, topics: [], fileName: '' }).catch(() => {});
+      }
+    }
     setJustAdded({ n: kept.length, subject: kept.find((t) => t.subject)?.subject ?? '' });
     setPlan(null); setGoal('');
     toast(`Added ${kept.length} tasks.`);
@@ -102,7 +109,7 @@ export function AiPanel({ store }: { store: Store }) {
           </label>
           <label className="f">Deadline<input type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} /></label>
           <label className="f">Hours / day<input type="number" min={0.5} max={12} step={0.5} value={hours} onChange={(e) => setHours(Number(e.target.value) || 2)} /></label>
-          <label className="f wide">Subject<input maxLength={40} list="aiSubj" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="NALR" /></label>
+          <label className="f wide">Subject / project<input maxLength={40} list="aiSubj" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="e.g. NALR or Video editor app" /></label>
           <datalist id="aiSubj">{subjects.map((s) => <option key={s} value={s} />)}</datalist>
         </div>
         <div className="actions"><button className="primary" disabled={busyGoal || !goal.trim()} onClick={makePlan}>{busyGoal ? 'Planning…' : plan ? 'Start over' : 'Make a plan'}</button></div>
@@ -117,7 +124,7 @@ export function AiPanel({ store }: { store: Store }) {
         )}
         {justAdded && (
           <div className="note-box">
-            <span>Added {justAdded.n} tasks. Want to change how they’re spread out?</span>
+            <span>Added {justAdded.n} tasks{justAdded.subject ? ` to “${justAdded.subject}” (progress shows on Home and in Subjects)` : ''}. Want to change how they’re spread out?</span>
             <button className="soft sm" onClick={() => { loadAdjust(justAdded.subject); setJustAdded(null); }}><Icon name="sparkle" size={14} /> Adjust them with AI</button>
           </div>
         )}

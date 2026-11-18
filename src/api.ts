@@ -1,7 +1,7 @@
 export type Status = 'later' | 'today' | 'done';
 export type Kind = 'study' | 'exam' | 'placement' | 'deadline';
 export type Repeat = '' | 'daily' | 'weekdays' | 'weekly' | `days:${string}`;
-export type SubjectKind = 'course' | 'exam' | 'placement';
+export type SubjectKind = 'course' | 'exam' | 'placement' | 'project';
 export interface Topic { title: string; done: boolean }
 export interface Subject { id: string; name: string; kind: SubjectKind; examDate: string | null; topics: Topic[]; fileName: string }
 export interface Step { text: string; done: boolean }
@@ -62,9 +62,9 @@ export const api = {
   unsubscribe: (endpoint: string) => call('POST', '/push/unsubscribe', { endpoint }),
   testPush: () => call<{ sent: number; devices: number }>('POST', '/push/test'),
   planGoal: (b: { goal: string; deadline: string; hoursPerDay: number; today: string }) =>
-    call<{ summary: string; tasks: { title: string; date: string; minutes: number; kind?: string }[] }>('POST', '/ai/plan-goal', b),
+    call<{ summary: string; rules?: string[]; tasks: { title: string; date: string; minutes: number; kind?: string }[] }>('POST', '/ai/plan-goal', b),
   refinePlan: (b: { instruction: string; tasks: { title: string; date: string; minutes: number; kind: string }[]; today: string; deadline: string | null; hoursPerDay: number | null; context: string; history: string[] }) =>
-    call<{ summary: string; tasks: { title: string; date: string; minutes: number; kind?: string }[] }>('POST', '/ai/refine-plan', b),
+    call<{ summary: string; rules?: string[]; tasks: { title: string; date: string; minutes: number; kind?: string }[] }>('POST', '/ai/refine-plan', b),
   planDay: (b: { hours: number; today: string }) => call<{ pick: { id: string; why: string }[]; advice: string }>('POST', '/ai/plan-day', b),
   saveSubject: (s: Subject) => call<{ subject: Subject }>('PUT', `/subjects/${encodeURIComponent(s.id)}`, s),
   deleteSubject: (id: string) => call('DELETE', `/subjects/${encodeURIComponent(id)}`),

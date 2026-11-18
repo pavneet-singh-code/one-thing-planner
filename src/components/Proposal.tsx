@@ -12,7 +12,7 @@ export type Proposal = {
   kind: Kind; subject: string; time: string; repeat: Repeat; notes: string; link: string;
   srcId?: string; // set when this came from an existing task
 };
-export type Plan = { summary: string; tasks: Proposal[] };
+export type Plan = { summary: string; tasks: Proposal[]; rules?: string[] };
 type AiTask = { title: string; date: string; minutes: number; kind?: string };
 
 export const keepers = (tasks: Proposal[]) => tasks.filter((t) => t.keep && t.title.trim());
@@ -45,7 +45,7 @@ export function toFields(p: Proposal) {
 const badLink = (ps: Proposal[]) => ps.find((p) => p.link.trim() && !/^https?:\/\//i.test(p.link.trim()));
 
 /* ---------- one editable row ---------- */
-function Row({ t, onChange, onRemove, subjects }: { t: Proposal; onChange: (p: Partial<Proposal>) => void; onRemove: () => void; subjects: string[] }) {
+function Row({ t, onChange, onRemove, subjects, deadline }: { t: Proposal; onChange: (p: Partial<Proposal>) => void; onRemove: () => void; subjects: string[]; deadline?: string | null }) {
   const [more, setMore] = useState(false);
   const extras = [t.subject, t.time && `⏰ ${t.time}`, t.repeat && '↻', t.notes && 'notes', t.link && 'link'].filter(Boolean).join(' · ');
   return (
@@ -53,6 +53,8 @@ function Row({ t, onChange, onRemove, subjects }: { t: Proposal; onChange: (p: P
       <input type="checkbox" aria-label="Keep this task" checked={t.keep} onChange={(e) => onChange({ keep: e.target.checked })} />
       <div className="prop-fields">
         <input className="bare strong" aria-label="Task" maxLength={140} value={t.title} placeholder="Task" onChange={(e) => onChange({ title: e.target.value })} />
+        {t.keep && t.date && deadline && t.date > deadline && <span className="warn-chip">After your deadline ({deadline.slice(5)})</span>}
+        {t.keep && t.date && t.date < today() && !t.srcId && <span className="warn-chip">Date is in the past</span>}
         <div className="prop-row">
           <input type="date" aria-label="Day" value={t.date} onChange={(e) => onChange({ date: e.target.value })} />
           <label className="mins"><input type="number" aria-label="Minutes" min={5} max={600} step={5} value={t.minutes} onChange={(e) => onChange({ minutes: Number(e.target.value) || 30 })} /> min</label>
@@ -79,12 +81,12 @@ function Row({ t, onChange, onRemove, subjects }: { t: Proposal; onChange: (p: P
   );
 }
 
-export function ProposalList({ tasks, onChange, subjects = [] }: { tasks: Proposal[]; onChange: (t: Proposal[]) => void; subjects?: string[] }) {
+export function ProposalList({ tasks, onChange, subjects = [], deadline }: { tasks: Proposal[]; onChange: (t: Proposal[]) => void; subjects?: string[]; deadline?: string | null }) {
   const upd = (i: number, p: Partial<Proposal>) => onChange(tasks.map((x, j) => (j === i ? { ...x, ...p } : x)));
   const last = tasks.at(-1);
   return (
     <>
-      {tasks.map((t, i) => <Row key={i} t={t} subjects={subjects} onChange={(p) => upd(i, p)} onRemove={() => onChange(tasks.filter((_, j) => j !== i))} />)}
+      {tasks.map((t, i) => <Row key={i} t={t} subjects={subjects} deadline={deadline} onChange={(p) => upd(i, p)} onRemove={() => onChange(tasks.filter((_, j) => j !== i))} />)}
       <button className="soft sm" style={{ alignSelf: 'flex-start' }}
         onClick={() => onChange([...tasks, { title: '', date: last?.date ?? today(), minutes: 30, keep: true, kind: 'study', subject: last?.subject ?? '', time: last?.time ?? '', repeat: '', notes: '', link: '' }])}>
         <Icon name="plus" size={14} /> Add a task
@@ -134,7 +136,7 @@ function Refine({ plan, setPlan, context }: { plan: Plan; setPlan: (p: Plan) => 
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState<string[]>([]);
-  const [undo, setUndo] = useState<Plan[]>([]);
+  const [undo, setUndo] = useState<{ plan: Plan; history: string[] }[]>([]);
 
   const run = async (instruction: string) => {
     if (!instruction.trim() || busy) return;
@@ -156,8 +158,8 @@ function Refine({ plan, setPlan, context }: { plan: Plan; setPlan: (p: Plan) => 
           title: n.title, date: n.date, minutes: n.minutes, kind: (n.kind as Kind) || old?.kind || 'study', keep: true,
         } as Proposal;
       });
-      setUndo([...undo, plan]);
-      setPlan({ summary: r.summary || plan.summary, tasks: next });
+      setUndo([...undo, { plan, history }]);
+      setPlan({ summary: r.summary || plan.summary, tasks: next, rules: r.rules?.length ? r.rules : plan.rules });
       setHistory([...history, instruction.trim()]);
       setText('');
       toast('Plan updated. Check it, then keep refining or save.');
@@ -176,15 +178,25 @@ function Refine({ plan, setPlan, context }: { plan: Plan; setPlan: (p: Plan) => 
           placeholder="e.g. I'm busy Friday, move those tasks; do Percentage first" disabled={busy} />
         <button className="round" type="submit" aria-label="Revise plan" disabled={busy || !text.trim()}>{busy ? <span className="spin" /> : <Icon name="send" />}</button>
       </form>
-      {(history.length > 0 || undo.length > 0) && (
+      {history.length > 0 && (
         <div className="refine-log">
-          {history.map((h, i) => <span key={i} className="chip">✓ {h}</span>)}
-          {undo.length > 0 && (
-            <button className="soft sm" disabled={busy} onClick={() => { setPlan(undo.at(-1)!); setUndo(undo.slice(0, -1)); setHistory(history.slice(0, -1)); }}>
-              <Icon name="left" size={14} /> Undo last change
-            </button>
-          )}
+          <span className="label">Your requests · all of these keep applying</span>
+          <ol>
+            {history.map((h, i) => (
+              <li key={i}>
+                <span>{h}</span>
+                <button type="button" className="icon-btn" aria-label="Stop applying this request" title="Stop applying this request from now on"
+                  onClick={() => setHistory(history.filter((_, j) => j !== i))}><Icon name="x" size={14} /></button>
+              </li>
+            ))}
+          </ol>
         </div>
+      )}
+      {undo.length > 0 && (
+        <button className="soft sm" style={{ alignSelf: 'flex-start' }} disabled={busy}
+          onClick={() => { const u = undo.at(-1)!; setPlan(u.plan); setHistory(u.history); setUndo(undo.slice(0, -1)); }}>
+          <Icon name="left" size={14} /> Undo last change
+        </button>
       )}
     </div>
   );
@@ -201,9 +213,18 @@ export function PlanReview({ plan, setPlan, context, store }: { plan: Plan; setP
   return (
     <div className="proposal">
       {plan.summary && <p className="why" style={{ margin: 0 }}>{plan.summary}</p>}
+      {!!plan.rules?.length && (
+        <div className="rules-box">
+          <span className="label"><Icon name="check" size={14} /> What the AI is following</span>
+          <ul>{plan.rules.map((r, i) => <li key={i}>{r}</li>)}</ul>
+        </div>
+      )}
+      {context.deadline && keepers(plan.tasks).some((t) => t.date > context.deadline!) && (
+        <p className="warn-line">Some tasks are after your deadline. Ask the AI to fit them in, or change their dates.</p>
+      )}
       <p className="muted small" style={{ margin: 0 }}>{n} tasks · {Math.floor(mins / 60)}h {mins % 60}m over {days} day{days === 1 ? '' : 's'}. Tap <b>More</b> on a task for subject, reminder, repeat, notes and link.</p>
       <ApplyAll tasks={plan.tasks} onChange={(tasks) => setPlan({ ...plan, tasks })} subjects={subjects} />
-      <ProposalList tasks={plan.tasks} onChange={(tasks) => setPlan({ ...plan, tasks })} subjects={subjects} />
+      <ProposalList tasks={plan.tasks} onChange={(tasks) => setPlan({ ...plan, tasks })} subjects={subjects} deadline={context.deadline} />
       {store.state?.ai && <Refine plan={plan} setPlan={setPlan} context={context} />}
     </div>
   );

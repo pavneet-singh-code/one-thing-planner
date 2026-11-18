@@ -3,7 +3,7 @@ import { getName, useStore, useToast } from './store';
 import { Activity, Greeting, NowHero, TasksPanel, TodayList } from './components/Tasks';
 import { AiPanel, KeyGate, SettingsPanel } from './components/Panels';
 import { CalendarPanel, Upcoming } from './components/Schedule';
-import { SubjectsPanel } from './components/Subjects';
+import { HomeProgress, SubjectsPanel } from './components/Subjects';
 import { EditContext, TaskEditor, type EditRequest } from './components/TaskEditor';
 import { Icon, type IconName } from './components/Icon';
 
@@ -83,6 +83,7 @@ export default function App() {
               </div>
               <div className="col-side">
                 <Greeting store={store} />
+                <HomeProgress store={store} goTo={setTab} />
                 <Activity store={store} />
               </div>
             </div>

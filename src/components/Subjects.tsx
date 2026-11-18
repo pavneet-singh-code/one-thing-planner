@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api, newId, type Subject, type SubjectKind, type Topic } from '../api';
 import { daysBetween, fmtDay, today } from '../dates';
 import { SUBJECT_KINDS } from '../kinds';
+import { fmtMins, progressOf } from '../progress';
 import { toast, type Store } from '../store';
 import { subjectClass } from '../subjects';
 import { Icon } from './Icon';
@@ -19,17 +20,7 @@ function allSubjects(store: Store): Subject[] {
   return [...store.subjects, ...extra];
 }
 
-function stats(store: Store, s: Subject) {
-  const tasks = store.tasks.filter((t) => t.subject === s.name && t.kind === 'study');
-  const done = tasks.filter((t) => t.status === 'done').length;
-  const td = today();
-  const overdue = tasks.filter((t) => t.status !== 'done' && t.due && t.due < td).length;
-  const minsLeft = tasks.filter((t) => t.status !== 'done').reduce((a, t) => a + t.est, 0);
-  const topicsDone = s.topics.filter((t) => t.done).length;
-  return { total: tasks.length, done, overdue, minsLeft, topicsDone };
-}
-
-const fmtMins = (m: number) => (m >= 60 ? `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}` : `${m}m`);
+const stats = (store: Store, s: Subject) => progressOf(store.tasks, s);
 
 /* ---------- page ---------- */
 export function SubjectsPanel({ store }: { store: Store }) {
@@ -52,7 +43,7 @@ export function SubjectsPanel({ store }: { store: Store }) {
         <div className="card empty-card">
           <Icon name="book" size={28} />
           <h2>No subjects yet</h2>
-          <p className="muted" style={{ margin: 0 }}>Add one for each exam or placement you’re preparing for (e.g. “NALR”, “TCS NQT”, “DBMS”). Upload its syllabus PDF and the AI turns it into a topic checklist and a study plan.</p>
+          <p className="muted" style={{ margin: 0 }}>Add one for each exam, placement or project you’re working on (e.g. “NALR”, “TCS NQT”, “Video editor app”). Upload its syllabus PDF and the AI turns it into a topic checklist and a study plan.</p>
           <div className="actions"><button className="primary" onClick={() => setOpen(blank())}>Add your first subject</button></div>
         </div>
       )}
@@ -61,7 +52,6 @@ export function SubjectsPanel({ store }: { store: Store }) {
         {sorted.map((s) => {
           const st = stats(store, s);
           const days = s.examDate ? daysBetween(td, s.examDate) : null;
-          const pctT = st.total ? Math.round((st.done / st.total) * 100) : 0;
           const pctP = s.topics.length ? Math.round((st.topicsDone / s.topics.length) * 100) : 0;
           return (
             <button key={s.id || s.name} className={'card subject-card ' + subjectClass(s.name)} onClick={() => setOpen(s)}>
@@ -75,10 +65,7 @@ export function SubjectsPanel({ store }: { store: Store }) {
                   <span>{days < 0 ? `was on ${fmtDay(s.examDate!)}` : days === 0 ? fmtDay(s.examDate!) : `day${days === 1 ? '' : 's'} left · ${fmtDay(s.examDate!)}`}</span>
                 </div>
               )}
-              <div className="meter">
-                <div className="meter-top"><span>Tasks</span><b>{st.done}/{st.total}</b></div>
-                <div className="track"><div style={{ width: `${pctT}%` }} /></div>
-              </div>
+              <ProgressMeter p={st} />
               <div className="meter">
                 <div className="meter-top"><span>Syllabus topics</span><b>{s.topics.length ? `${st.topicsDone}/${s.topics.length}` : 'none yet'}</b></div>
                 <div className="track"><div style={{ width: `${pctP}%` }} /></div>
@@ -187,7 +174,7 @@ function SubjectSheet({ store, subject, onClose }: { store: Store; subject: Subj
 
         <div className="grid">
           <label className="f wide">Name<input maxLength={40} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. NALR, TCS NQT, DBMS" autoFocus={isNew && !subject.name} /></label>
-          <label className="f wide">{kind === 'placement' ? 'Drive / test date' : kind === 'exam' ? 'Exam date' : 'Finish by'}
+          <label className="f wide">{kind === 'placement' ? 'Drive / test date' : kind === 'exam' ? 'Exam date' : kind === 'project' ? 'Due date' : 'Finish by'}
             <input type="date" value={examDate} onChange={(e) => setExamDate(e.target.value)} />
           </label>
         </div>
@@ -281,3 +268,55 @@ function SubjectSheet({ store, subject, onClose }: { store: Store; subject: Subj
   );
 }
 
+
+/** Task progress bar with a tick where you should be by today. */
+export function ProgressMeter({ p, label = 'Progress' }: { p: ReturnType<typeof progressOf>; label?: string }) {
+  return (
+    <div className="meter">
+      <div className="meter-top">
+        <span>{label}</span>
+        <b>{p.total ? `${p.pct}% · ${p.done}/${p.total}` : 'no tasks yet'}</b>
+      </div>
+      <div className="track pbar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={p.pct} aria-label={`${label}: ${p.pct}%`}>
+        <div style={{ width: `${p.pct}%` }} />
+        {p.total > 0 && p.expectedPct > 0 && p.status !== 'done' && <i className="pbar-goal" style={{ left: `${p.expectedPct}%` }} title={`Where you should be by today: ${p.expectedPct}%`} />}
+      </div>
+      {p.total > 0 && (
+        <span className={'pstatus ' + p.status}>
+          {p.status === 'done' ? '🎉 All done' : p.status === 'behind' ? `Behind: ${p.overdue} overdue` : 'On track'}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Home: progress bars for exams, placements and projects, nearest deadline first. */
+export function HomeProgress({ store, goTo }: { store: Store; goTo: (tab: string) => void }) {
+  const td = today();
+  const rows = allSubjects(store)
+    .map((s) => ({ s, p: progressOf(store.tasks, s) }))
+    .filter((r) => r.p.total > 0 && r.p.status !== 'done' || (r.p.status === 'done' && r.s.examDate && r.s.examDate >= td))
+    .sort((a, b) => (a.s.examDate && a.s.examDate >= td ? a.s.examDate : '9999').localeCompare(b.s.examDate && b.s.examDate >= td ? b.s.examDate : '9999'))
+    .slice(0, 5);
+  if (!rows.length) return null;
+  return (
+    <section className="card">
+      <div className="section-head">
+        <h2>Progress</h2>
+        <button className="soft sm" onClick={() => goTo('subjects')}>All <Icon name="right" size={14} /></button>
+      </div>
+      <div className="home-progress">
+        {rows.map(({ s, p }) => (
+          <button key={s.id || s.name} className={'hp-row ' + subjectClass(s.name)} onClick={() => goTo('subjects')}>
+            <div className="hp-top">
+              <span className="subject-name sm"><i className={'dot ' + subjectClass(s.name)} />{s.name}</span>
+              {p.daysLeft != null && p.daysLeft >= 0 && <span className={'hp-days' + (p.daysLeft <= 7 ? ' soon' : '')}>{p.daysLeft === 0 ? 'today' : `${p.daysLeft}d left`}</span>}
+            </div>
+            <ProgressMeter p={p} label={SUBJECT_KINDS.find((k) => k.id === s.kind)?.label ?? 'Progress'} />
+            {p.next && <span className="hp-next">Next: {p.next.title}</span>}
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}

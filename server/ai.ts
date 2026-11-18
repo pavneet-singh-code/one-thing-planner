@@ -78,25 +78,28 @@ function normTasks(raw: PlannedTask[] | undefined, max: number) {
 }
 export async function planGoal(p: { goal: string; deadline: string; hoursPerDay: number; today: string }) {
   const prompt = `${COACH}
-Today is ${p.today}. Deadline: ${p.deadline}. Available: about ${p.hoursPerDay} hours per day.
-Goal: """${p.goal}"""
-Break the goal into study tasks:
-- Each task is doable in one sitting (15-90 minutes), starts with a verb, and says exactly what to do (which chapter, how many problems, etc.). Under 90 characters.
-- Spread tasks from today to the day before the deadline; never more than ${p.hoursPerDay} hours on one day.
-- Include at least one review or practice-test task near the end. At most 14 tasks.
+Today is ${p.today} (${weekdayOf(p.today)}). Deadline: ${p.deadline} (${weekdayOf(p.deadline)}). Default time budget: about ${p.hoursPerDay} hours per day.
+Goal, in the student's own words (between the markers). Anything they say about timing, breaks, days off or how to group work OVERRIDES the default time budget:
+<<<
+${p.goal}
+>>>
+${calendar(p.today, p.deadline)}
+Make a plan:
+- Each task fits one sitting (15-90 minutes), starts with a verb, and says exactly what to do (which chapter, how many problems, which tool to try...). Under 90 characters. Be specific to this goal, not generic.
+- Use only dates from the calendar above, on or before the deadline. Several tasks may share a day and some days can be empty.
+- Unless the goal says otherwise, stay near the default time budget per day.
+- Include a review / practice-test (or for projects, a check-in or demo) task near the end. At most 30 tasks.
 - ${KIND_RULE}
+- Fill "rules" first: the concrete scheduling rules you followed, in short phrases (e.g. "Finish by Nov 30", "About 30 min a day").
 - "summary" is one sentence on the strategy.`;
-  const r = await askJson<{ summary?: string; tasks?: PlannedTask[] }>(prompt, {
+  const r = await askJson<{ rules?: string[]; summary?: string; tasks?: PlannedTask[] }>(prompt, {
     type: 'object',
-    properties: {
-      summary: { type: 'string' },
-      tasks: TASKS_SCHEMA,
-    },
-    required: ['summary', 'tasks'],
+    properties: { rules: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' }, tasks: TASKS_SCHEMA },
+    required: ['rules', 'summary', 'tasks'],
   });
-  const tasks = normTasks(r.tasks, 20);
+  const tasks = normTasks(r.tasks, 30);
   if (!tasks.length) throw new AiError('Gemini did not suggest any tasks. Try describing the goal in more detail.');
-  return { summary: String(r.summary ?? ''), tasks };
+  return { summary: String(r.summary ?? ''), rules: cleanRules(r.rules), tasks };
 }
 
 export async function readSyllabus(p: { pdf: string; text: string; subject: string; kind: string; examDate: string | null; hoursPerDay: number; today: string; plan: boolean }) {
@@ -130,31 +133,52 @@ ${p.plan ? `2. "tasks": a study plan from today to the day before ${end}. Each t
   return { topics, summary: String(r.summary ?? ''), tasks };
 }
 
-/** Revise an existing plan from a follow-up request ("lighter weekends", "more mock tests"...). */
+/**
+ * Revise a plan from a follow-up request. Every earlier request is still a rule (not "done and forgotten");
+ * when two rules conflict the newer one wins, and rules beat the default time budget.
+ */
 export async function refinePlan(p: {
   instruction: string; tasks: PlannedTask[]; today: string; deadline: string | null; hoursPerDay: number | null; context: string; history: string[];
 }) {
+  const rules = [...p.history, p.instruction];
+  const lastDate = p.tasks.map((t) => t.date).filter(Boolean).sort().at(-1) ?? p.today;
+  const end = p.deadline && p.deadline > lastDate ? p.deadline : lastDate > p.today ? lastDate : addDaysIso(p.today, 28);
   const prompt = `${COACH}
-Today is ${p.today}.${p.deadline ? ` Deadline: ${p.deadline}.` : ''}${p.hoursPerDay ? ` Available: about ${p.hoursPerDay} hours per day.` : ''}
+Today is ${p.today} (${weekdayOf(p.today)}).
 ${p.context ? `What this plan is for (between the markers):\n<<<\n${p.context}\n>>>` : ''}
-${p.history.length ? `Requests already applied earlier: ${p.history.map((h) => JSON.stringify(h)).join('; ')}.` : ''}
-Current plan (JSON): ${JSON.stringify(p.tasks)}
-The student now asks (between the markers):
-<<<
-${p.instruction}
->>>
-Return the complete revised plan with this request applied. Keep every task the request does not affect exactly as it is (same title, date, minutes and kind).
-Rules unless the student asks otherwise: each task fits one sitting (15-90 minutes), starts with a verb, is under 90 characters, dates are YYYY-MM-DD from today onwards. At most 50 tasks. ${KIND_RULE}
-"summary" is one short sentence saying what you changed.`;
-  const r = await askJson<{ summary?: string; tasks?: PlannedTask[] }>(prompt, {
+Default settings (lowest priority, only when no rule says otherwise):${p.deadline ? ` finish by ${p.deadline} (${weekdayOf(p.deadline)});` : ''}${p.hoursPerDay ? ` about ${p.hoursPerDay} hours per day;` : ''} tasks of 15-90 minutes.
+
+The student's rules for this plan, oldest first. ALL of them still apply, not just the last one. If two rules conflict, the later one wins only on the point where they conflict; keep the rest of the earlier rule. Rules always beat the default settings (for example, putting several tasks on one day is fine if a rule asks to group work, even if that day goes over the default hours).
+${rules.map((r, i) => `${i + 1}. ${i === rules.length - 1 ? '(newest) ' : ''}<<<${r}>>>`).join('\n')}
+
+${calendar(p.today, end)}
+Current plan (JSON, one object per task): ${JSON.stringify(p.tasks)}
+
+Rewrite the plan so it satisfies every rule at once:
+1. First fill "rules": restate each of the student's rules as a short, concrete constraint you are applying, merged where they overlap (for example "Rest 2 days after each work day, so work days are: <the actual dates>", "Nothing after <deadline>", "No tasks on Sundays", "Group 2-3 tasks per work day"). This list is shown to the student so they can see what you remembered.
+2. Then "tasks": the complete revised plan. Use dates from the calendar above. Several tasks may share a day. Keep a task's title, minutes and kind unless a rule needs them changed. Keep the same work unless a rule asks to add or drop work. Titles start with a verb and stay under 90 characters. At most 50 tasks. ${KIND_RULE}
+3. "summary": one short sentence saying what changed.
+Before answering, check every task date against every rule (rest days, weekends, deadline) and fix any that break one.`;
+  const r = await askJson<{ rules?: string[]; summary?: string; tasks?: PlannedTask[] }>(prompt, {
     type: 'object',
-    properties: { summary: { type: 'string' }, tasks: TASKS_SCHEMA },
-    required: ['summary', 'tasks'],
+    properties: { rules: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' }, tasks: TASKS_SCHEMA },
+    required: ['rules', 'summary', 'tasks'],
   });
   const tasks = normTasks(r.tasks, 50);
   if (!tasks.length) throw new AiError('Gemini returned an empty plan. Try rephrasing your request.');
-  return { summary: String(r.summary ?? ''), tasks };
+  return { summary: String(r.summary ?? ''), rules: cleanRules(r.rules), tasks };
 }
+
+/** "2026-11-18 Wed" lines from `from` to `to` (max 70 days), so the model never has to do date maths. */
+function calendar(from: string, to: string) {
+  const out: string[] = [];
+  for (let d = from, i = 0; d <= to && i < 70; d = addDaysIso(d, 1), i++) out.push(`${d} ${weekdayOf(d)}`);
+  return `Calendar (date and weekday), today to the end:\n${out.join(', ')}`;
+}
+function weekdayOf(s: string) {
+  return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date(s + 'T12:00:00Z').getUTCDay()];
+}
+const cleanRules = (r: unknown) => (Array.isArray(r) ? r.map(String).map((x) => x.trim().slice(0, 160)).filter(Boolean).slice(0, 10) : []);
 
 function addDaysIso(s: string, n: number) {
   const d = new Date(s + 'T12:00:00Z');

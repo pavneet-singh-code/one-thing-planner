@@ -39,7 +39,7 @@ const STATUSES = new Set(['later', 'today', 'done']);
 const KINDS = new Set(['study', 'exam', 'placement', 'deadline']);
 const REPEATS = new Set(['', 'daily', 'weekdays', 'weekly']);
 const DAYS_RULE = /^days:[0-6](,[0-6]){0,6}$/;
-const SUBJECT_KINDS = new Set(['course', 'exam', 'placement']);
+const SUBJECT_KINDS = new Set(['course', 'exam', 'placement', 'project']);
 const kind = (v: unknown) => (KINDS.has(v as string) ? (v as string) : 'study');
 const repeat = (v: unknown) => {
   const s = typeof v === 'string' ? v : '';
@@ -275,7 +275,7 @@ app.post('/ai/refine-plan', async (c) => {
   const tasks = (b.tasks as Record<string, unknown>[]).slice(0, 60).map((t) => ({
     title: str(t.title, 140, 'title'), date: dateStr(t.date, 'date') ?? '', minutes: int(t.minutes, 5, 600, 30), kind: kind(t.kind),
   })).filter((t) => t.title);
-  const history = Array.isArray(b.history) ? (b.history as unknown[]).slice(-8).map((h) => String(h).slice(0, 300)) : [];
+  const history = Array.isArray(b.history) ? (b.history as unknown[]).slice(-12).map((h) => String(h).slice(0, 300)) : [];
   return c.json(await refinePlan({
     instruction: str(b.instruction, 500, 'instruction', true),
     tasks, today, history,

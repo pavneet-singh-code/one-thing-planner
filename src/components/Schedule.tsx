@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { Kind, Subject, Task } from '../api';
 import { addDays, dayNum, daysBetween, fmtClock, fmtDay, fmtShort, startOfWeek, today, weekday, ymd } from '../dates';
 import { useDrag } from '../drag';
-import { KINDS, taskClass } from '../kinds';
+import { KINDS, subjectDateLabel, taskClass } from '../kinds';
 import { subjectClass } from '../subjects';
 import { toast, type Store } from '../store';
 import { Icon } from './Icon';
@@ -16,6 +16,7 @@ export function tasksOn(store: Store, day: string) {
 }
 const rank = (t: Task) => (t.kind === 'exam' || t.kind === 'placement' ? 0 : t.kind === 'deadline' ? 1 : t.status === 'done' ? 3 : 2);
 const subjectsOn = (store: Store, day: string) => store.subjects.filter((s) => s.examDate === day && s.kind !== 'course');
+const markKind = (s: Subject): Kind => (s.kind === 'project' ? 'deadline' : (s.kind as Kind));
 
 /** One day: exam/placement markers, then tasks. Tasks can be dragged to another day. */
 function DayColumn({ store, day, compact, drag, goTo, filter }: {
@@ -62,7 +63,7 @@ function DayColumn({ store, day, compact, drag, goTo, filter }: {
 function SubjectMark({ s, onClick }: { s: Subject; onClick: () => void }) {
   return (
     <button className={'event mark k-' + s.kind} onClick={onClick}>
-      <span className="event-k">{s.kind === 'placement' ? 'Placement' : 'Exam'}</span>
+      <span className="event-k">{subjectDateLabel(s.kind)}</span>
       <span className="event-t">{s.name}</span>
     </button>
   );
@@ -117,7 +118,7 @@ export function Countdown({ s, onClick }: { s: Subject; onClick?: () => void }) 
   return (
     <button className={'countdown k-' + s.kind} onClick={onClick}>
       <b>{n === 0 ? 'Today' : n === 1 ? 'Tomorrow' : `${n} days`}</b>
-      <span>until {s.name} {s.kind === 'placement' ? 'placement' : 'exam'} · {fmtShort(s.examDate!)}</span>
+      <span>until {s.name} {s.kind === 'placement' ? 'placement' : s.kind === 'project' ? 'is due' : 'exam'} · {fmtShort(s.examDate!)}</span>
     </button>
   );
 }
@@ -219,7 +220,7 @@ function matchTask(f: Filter, t: Task) {
   return true;
 }
 function matchMark(f: Filter, s: Subject) {
-  if (f.kinds.length && !f.kinds.includes(s.kind as Kind)) return false;
+  if (f.kinds.length && !f.kinds.includes(markKind(s))) return false;
   if (f.subjects.length && !f.subjects.includes(s.name)) return false;
   if (f.status === 'done' || f.repeating) return false;
   const q = f.q.trim().toLowerCase();

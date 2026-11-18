@@ -12,8 +12,11 @@ export const kindLabel = (k: Kind) => KINDS.find((x) => x.id === k)?.label ?? 'S
 export const SUBJECT_KINDS: { id: SubjectKind; label: string }[] = [
   { id: 'exam', label: 'Exam' },
   { id: 'placement', label: 'Placement' },
+  { id: 'project', label: 'Project' },
   { id: 'course', label: 'Course' },
 ];
+/** Calendar / tag label for a subject's date */
+export const subjectDateLabel = (k: SubjectKind) => (k === 'placement' ? 'Placement' : k === 'exam' ? 'Exam' : k === 'project' ? 'Project due' : 'Finish by');
 
 export const DAY_LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
