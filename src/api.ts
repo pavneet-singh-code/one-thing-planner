@@ -51,7 +51,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 }
 
 export const api = {
-  state: () => call<AppState>('GET', '/state'),
+  state: async () => normalizeState(await call<AppState>('GET', '/state')),
   createTasks: (tasks: Partial<Task>[]) => call<{ tasks: Task[] }>('POST', '/tasks', { tasks }),
   updateTask: (id: string, patch: Partial<Task>) => call<{ task: Task }>('PATCH', `/tasks/${encodeURIComponent(id)}`, patch),
   deleteTask: (id: string) => call('DELETE', `/tasks/${encodeURIComponent(id)}`),
@@ -74,3 +74,30 @@ export const api = {
 };
 
 export const newId = () => 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+
+/* Old or odd data from the server must never crash the screen: fill in safe defaults. */
+const arr = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
+const txt = (v: unknown) => (typeof v === 'string' ? v : '');
+function normalizeState(s: AppState): AppState {
+  const tasks = arr<Task>(s?.tasks).filter((t) => t && typeof t.id === 'string').map((t) => ({
+    ...t,
+    title: txt(t.title) || '(untitled)', subject: txt(t.subject), notes: txt(t.notes), link: txt(t.link),
+    kind: (['study', 'exam', 'placement', 'deadline'].includes(t.kind) ? t.kind : 'study') as Kind,
+    repeat: (typeof t.repeat === 'string' ? t.repeat : '') as Repeat,
+    status: (['later', 'today', 'done'].includes(t.status) ? t.status : 'later') as Status,
+    due: typeof t.due === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(t.due) ? t.due : null,
+    remindAt: t.remindAt ? String(t.remindAt) : null,
+    doneAt: t.doneAt ? String(t.doneAt) : null,
+    createdAt: t.createdAt ? String(t.createdAt) : new Date(0).toISOString(),
+    est: Number(t.est) || 30, ord: Number(t.ord) || 0,
+    steps: arr<Step>(t.steps).filter((x) => x && typeof x.text === 'string'),
+    reminded: !!t.reminded,
+  }));
+  const subjects = arr<Subject>(s?.subjects).filter((x) => x && typeof x.name === 'string').map((x) => ({
+    ...x, topics: arr<Topic>(x.topics).filter((t) => t && typeof t.title === 'string'), fileName: txt(x.fileName),
+    examDate: typeof x.examDate === 'string' ? x.examDate : null,
+    kind: (['course', 'exam', 'placement', 'project'].includes(x.kind) ? x.kind : 'course') as SubjectKind,
+  }));
+  const focus = arr<FocusDay>(s?.focus).filter((f) => f && typeof f.day === 'string').map((f) => ({ day: f.day, minutes: Number(f.minutes) || 0 }));
+  return { ...s, tasks, subjects, focus, ai: !!s?.ai, push: !!s?.push, vapidPublicKey: txt(s?.vapidPublicKey) };
+}

@@ -239,6 +239,11 @@ export function SettingsPanel({ store }: { store: Store }) {
         <p className="muted small" style={{ margin: 0 }}>This device is unlocked with your access key. Lock it to remove the key from this device.</p>
         <div className="actions"><button className="soft" onClick={() => { setKey(''); location.reload(); }} disabled={!getKey()}>Lock this device</button></div>
       </div>
+      <div className="card">
+        <h2>App not updating or acting strange?</h2>
+        <p className="muted small" style={{ margin: 0 }}>Reset clears the offline copy of the app on this device and downloads the newest version. Your tasks are stored online and stay safe.</p>
+        <div className="actions"><button className="soft" onClick={() => location.assign('/?reset')}>Reset app</button></div>
+      </div>
     </div>
   );
 }

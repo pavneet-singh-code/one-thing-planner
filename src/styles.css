@@ -403,3 +403,4 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; }
 .hp-next { font-size: .8rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hp-row .track, .subject-card .track { background: var(--card); box-shadow: inset 0 0 0 1px var(--rule); }
 .subject-card .track { background: var(--field); }
+.crash { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .8rem; background: var(--exb); color: var(--exi); border-radius: var(--r-sm); padding: 10px 12px; margin: 0; }
