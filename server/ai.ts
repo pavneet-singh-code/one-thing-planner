@@ -15,20 +15,28 @@ async function askJson<T>(prompt: string, schema: object): Promise<T> {
   if (!aiEnabled()) throw new AiError('AI is off: set GEMINI_API_KEY on the server.', 503);
   client ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
   let text: string | undefined;
-  try {
-    const r = await client.models.generateContent({
-      model: model(),
-      contents: prompt,
-      config: { responseMimeType: 'application/json', responseJsonSchema: schema, temperature: 0.4 },
-    });
-    text = r.text;
-  } catch (e) {
-    const msg = String((e as Error)?.message ?? e);
-    if (/429|RESOURCE_EXHAUSTED|quota/i.test(msg)) throw new AiError('Gemini free-tier limit reached. Wait a minute and try again.', 429);
-    if (/API key|PERMISSION_DENIED|401|403/i.test(msg)) throw new AiError('Gemini rejected the API key. Check GEMINI_API_KEY.', 502);
-    if (/not found|404/i.test(msg)) throw new AiError(`Gemini model "${model()}" was not found. Set GEMINI_MODEL to a current model.`, 502);
-    console.error('[ai]', e);
-    throw new AiError('Gemini request failed. Try again.');
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const r = await client.models.generateContent({
+        model: model(),
+        contents: prompt,
+        config: { responseMimeType: 'application/json', responseJsonSchema: schema, temperature: 0.4 },
+      });
+      text = r.text;
+      break;
+    } catch (e) {
+      const msg = String((e as Error)?.message ?? e);
+      // Gemini is often briefly overloaded; retry those once or twice.
+      if (attempt < 3 && /\b(500|503)\b|UNAVAILABLE|overloaded|INTERNAL|fetch failed|ECONNRESET/i.test(msg)) {
+        await new Promise((r) => setTimeout(r, 1000 * attempt));
+        continue;
+      }
+      if (/429|RESOURCE_EXHAUSTED|quota/i.test(msg)) throw new AiError('Gemini free-tier limit reached. Wait a minute and try again.', 429);
+      if (/API key|PERMISSION_DENIED|401|403/i.test(msg)) throw new AiError('Gemini rejected the API key. Check GEMINI_API_KEY.', 502);
+      if (/not found|404/i.test(msg)) throw new AiError(`Gemini model "${model()}" was not found. Set GEMINI_MODEL to a current model.`, 502);
+      console.error('[ai]', e);
+      throw new AiError(`Gemini request failed: ${detail(msg)}`);
+    }
   }
   try {
     return JSON.parse(text ?? '') as T;
@@ -108,6 +116,12 @@ Break it into 3 to 6 tiny steps, each doable in 5-15 minutes, starting with the 
   const steps = (r.steps ?? []).map(String).map((s) => s.trim()).filter(Boolean).slice(0, 8);
   if (!steps.length) throw new AiError('Gemini returned no steps. Try again.');
   return { steps };
+}
+
+// Pull the human-readable "message" out of Gemini's JSON error, never echoing the key.
+function detail(msg: string) {
+  const m = /"message"\s*:\s*"([^"]+)"/.exec(msg);
+  return (m ? m[1] : msg).replace(/key=[^&\s"]+/gi, 'key=…').slice(0, 200);
 }
 
 function clampInt(v: unknown, min: number, max: number, dflt: number) {
