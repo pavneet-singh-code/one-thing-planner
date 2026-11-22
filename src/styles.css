@@ -214,7 +214,13 @@ summary::-webkit-details-marker { display: none; }
 .cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; }
 .cal-day { min-height: 200px; }
 .cal-day.past { opacity: .65; }
-@media (max-width: 760px) { .cal { grid-template-columns: 1fr; } .cal-day { min-height: 0; } .cal-head { border-bottom-width: 1px; } }
+@media (max-width: 760px) {
+  .cal { grid-template-columns: repeat(7, 140px); }
+  .cal-day { min-height: 160px; }
+  .cal-wrap { gap: 0; }
+  .side-arrow { position: absolute; top: 50%; transform: translateY(-50%); margin: 0; width: 38px; height: 38px; opacity: .95; }
+  .side-arrow.left { left: -8px; } .side-arrow.right { right: -8px; }
+}
 
 /* ---------- activity ---------- */
 .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
@@ -416,13 +422,12 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; }
 .desk-banner > span { flex: 1 1 60%; }
 .late-badge { font-size: .78rem; font-weight: 700; color: var(--exi); background: var(--exb); border-radius: 99px; padding: 2px 10px; }
 .routines .row .btns { flex-wrap: wrap; justify-content: flex-end; }
-/* ---------- scrollable calendar ---------- */
-.cal-week { display: flex; flex-direction: column; gap: 8px; scroll-margin-top: 12px; }
-.cal-week + .cal-week { margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--rule); }
-.week-head { position: sticky; top: 0; z-index: 4; display: flex; align-items: center; gap: 10px; padding: 8px 2px; background: var(--card); font-family: var(--f-display); }
-.week-head b { font-size: 1.05rem; }
-.week-tag { font-family: var(--f-body); font-size: .72rem; font-weight: 700; color: var(--accent-strong); background: var(--accent-soft); border-radius: 99px; padding: 1px 9px; }
-.cal-more { text-align: center; color: var(--muted); font-size: .85rem; padding: 14px 0 4px; }
-.earlier { align-self: center; }
+/* ---------- week calendar with side arrows ---------- */
+.cal-wrap { position: relative; display: flex; align-items: stretch; gap: 8px; }
+.cal-scroll { flex: 1; min-width: 0; overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: thin; padding-bottom: 4px; }
+.cal-scroll .cal-day { scroll-snap-align: start; }
+.side-arrow { position: sticky; top: 40vh; align-self: flex-start; flex: none; width: 40px; height: 40px; min-height: 0; padding: 0; border-radius: 50%;
+  background: var(--card); color: var(--ink); box-shadow: var(--shadow), 0 0 0 1px var(--rule); margin-top: 60px; z-index: 3; }
+.side-arrow:hover { background: var(--accent); color: var(--accent-ink); }
 .pill.jump input[type="date"] { width: 1.6em; color: transparent; }
 .pill.jump input[type="date"]::-webkit-calendar-picker-indicator { margin: 0; cursor: pointer; }
