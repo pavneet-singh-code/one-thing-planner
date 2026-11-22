@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, ApiError, newId, type AppState, type Kind, type Repeat, type Subject, type Task } from './api';
-import { addDays, nextRepeat, today, ymd } from './dates';
+import { addDays, latestRepeat, nextRepeat, pendingDays, today, ymd } from './dates';
 
 /* ---------- toast ---------- */
 type ToastFn = (msg: string) => void;
@@ -113,8 +113,16 @@ export function useStore() {
           const remindAt = t.remindAt ? new Date(new Date(t.remindAt).getTime() + (shift || 86400000)).toISOString() : null;
           a.add([{ title: t.title, subject: t.subject, notes: t.notes, kind: t.kind, link: t.link, repeat: t.repeat, est: t.est, due, remindAt }])
             .then(([n]) => { if (t.steps.length) patch(n.id, { steps: t.steps.map((s) => ({ ...s, done: false })) }); });
-          toast(`Done. Next one is on ${new Date(due + 'T12:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}.`);
+          const left = pendingDays(due, t.repeat);
+          const when = new Date(due + 'T12:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+          toast(left > 1 ? `Done. Next: ${when}. ${left} days of this are still pending.` : left === 1 ? `Done. Next one (${when}) is due now.` : `Done. Next one is on ${when}.`);
         } else toast('Done. Nice work.');
+      },
+      /** Repeating task that fell behind: drop the missed days and jump to the latest scheduled day (usually today). */
+      skipMissed(t: Task) {
+        if (!t.repeat || !t.due) return;
+        const day = latestRepeat(t.due, t.repeat);
+        if (day !== t.due) { a.moveToDay(t, day); toast('Skipped the missed days.'); }
       },
       /** Move a task to another day; its reminder moves by the same number of days. */
       moveToDay(t: Task, day: string) {

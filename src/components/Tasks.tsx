@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { api, type Repeat, type Task } from '../api';
-import { addDays, fmtShort, fmtTime, greeting, today, weekday, ymd } from '../dates';
+import { addDays, fmtShort, fmtTime, greeting, pendingDays, today, weekday, ymd } from '../dates';
 import { useDrag } from '../drag';
 import { kindLabel, repeatLabel } from '../kinds';
 import { getName, TODAY_LIMIT, toast, type Store } from '../store';
@@ -21,7 +21,7 @@ export function Chips({ t }: { t: Task }) {
       {t.due && (
         <span className={'chip' + (t.status !== 'done' && t.due < td ? ' due-over' : t.due === td ? ' due-today' : '')}>
           <Icon name="calendar" size={13} />
-          {t.status !== 'done' && t.due < td ? `Overdue · ${fmtShort(t.due)}` : t.due === td ? 'Today' : t.due === addDays(td, 1) ? 'Tomorrow' : fmtShort(t.due)}
+          {t.status !== 'done' && t.due < td ? (t.repeat ? `Late since ${fmtShort(t.due)} · ${pendingDays(t.due, t.repeat)} days pending` : `Overdue · ${fmtShort(t.due)}`) : t.due === td ? 'Today' : t.due === addDays(td, 1) ? 'Tomorrow' : fmtShort(t.due)}
         </span>
       )}
       <span className="chip"><Icon name="clock" size={13} />{t.est} min</span>
@@ -348,6 +348,7 @@ export function Routines({ store }: { store: Store }) {
     if (!cur || (t.due ?? '') < (cur.due ?? '')) series.set(k, t);
   }
   const list = [...series.values()].sort((a, b) => (a.due ?? '').localeCompare(b.due ?? ''));
+  const behind = list.reduce((n, t) => n + (t.due && t.due < today() ? pendingDays(t.due, t.repeat) : 0), 0);
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -362,6 +363,7 @@ export function Routines({ store }: { store: Store }) {
     <section className="card routines">
       <div className="section-head">
         <h2><Icon name="repeat" /> Repeating tasks</h2>
+        {behind > 0 && <span className="late-badge">{behind} day{behind === 1 ? '' : 's'} of work pending</span>}
         <button className={open ? 'soft sm' : 'primary sm'} onClick={() => setOpen((v) => !v)}>{open ? 'Close' : <><Icon name="plus" size={14} /> New repeating task</>}</button>
       </div>
       {open && (
@@ -388,13 +390,16 @@ export function Routines({ store }: { store: Store }) {
               <span className="t">{t.title}</span>
               <div className="meta">
                 <span className="chip strong-chip">{repeatLabel(t.repeat, t.due)}</span>
-                {t.due && <span className="chip"><Icon name="calendar" size={13} />Next: {t.due === today() ? 'Today' : fmtShort(t.due)}</span>}
+                {t.due && t.due < today()
+                  ? <span className="chip due-over"><Icon name="calendar" size={13} />Late since {fmtShort(t.due)} · {pendingDays(t.due, t.repeat)} days pending</span>
+                  : t.due && <span className="chip"><Icon name="calendar" size={13} />Next: {t.due === today() ? 'Today' : fmtShort(t.due)}</span>}
                 {t.remindAt && <span className="chip"><Icon name="bell" size={13} />{new Date(t.remindAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}</span>}
                 <span className="chip"><Icon name="clock" size={13} />{t.est} min</span>
                 {t.subject && <span className={'tag ' + subjectClass(t.subject)}>{t.subject}</span>}
               </div>
             </div>
             <div className="btns">
+              {t.due && t.due < today() && <button className="soft sm" title="Drop the missed days and just do the latest one" onClick={() => store.actions.skipMissed(t)}>Skip missed</button>}
               <button className="soft sm" title="Keep this one, stop future repeats" onClick={() => { store.actions.edit(t, { repeat: '' }); toast('It won’t repeat any more.'); }}>Stop</button>
             </div>
           </div>

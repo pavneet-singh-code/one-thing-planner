@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Kind, Subject, Task } from '../api';
 import { addDays, dayNum, daysBetween, fmtClock, fmtDay, fmtShort, startOfWeek, today, weekday, ymd } from '../dates';
 import { useDrag } from '../drag';
@@ -126,31 +126,87 @@ export function Countdown({ s, onClick }: { s: Subject; onClick?: () => void }) 
 /* ---------- Calendar page ---------- */
 export function CalendarPanel({ store, goTo }: { store: Store; goTo: (tab: string) => void }) {
   const td = today();
-  const [start, setStart] = useState(startOfWeek(td));
+  const thisWeek = startOfWeek(td);
+  // A continuous, scrollable list of weeks: starts at this week, grows downwards as you scroll,
+  // and "Show earlier weeks" adds weeks above without jumping the page.
+  const [first, setFirst] = useState(thisWeek);
+  const [count, setCount] = useState(6);
   const drag = useDayDrop(store);
   const [filter, setFilterState] = useState<Filter>(loadFilter);
   const setFilter = (f: Filter) => { setFilterState(f); try { localStorage.setItem(FILTER_KEY, JSON.stringify(f)); } catch { /* ignore */ } };
-  const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
+  const weeks = Array.from({ length: count }, (_, i) => addDays(first, i * 7));
+  const last = addDays(weeks[weeks.length - 1], 6);
   const undated = store.laters.filter((t) => !t.due && !t.remindAt && matchTask(filter, t));
-  const weekTasks = days.flatMap((d) => tasksOn(store, d));
-  const shown = weekTasks.filter((t) => matchTask(filter, t)).length;
+  const loadedTasks = store.tasks.filter((t) => { const d = t.due ?? (t.remindAt ? ymd(new Date(t.remindAt)) : null); return d && d >= first && d <= last; });
+  const shown = loadedTasks.filter((t) => matchTask(filter, t)).length;
+
+  // load more weeks when the bottom comes into view
+  const bottom = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = bottom.current;
+    if (!el) return;
+    const io = new IntersectionObserver((e) => { if (e[0].isIntersecting) setCount((c) => Math.min(c + 4, 160)); }, { rootMargin: '600px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
+  // keep the page still when weeks are added above
+  const keep = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    if (keep.current != null) { window.scrollBy(0, document.documentElement.scrollHeight - keep.current); keep.current = null; }
+  }, [first]);
+  const addEarlier = (n = 4) => { keep.current = document.documentElement.scrollHeight; setFirst(addDays(first, -7 * n)); setCount((c) => c + n); };
+
+  const pending = useRef<string | null>(null);
+  const scrollToWeek = (w: string) => {
+    if (w < first) { pending.current = w; const n = Math.ceil(daysBetween(w, first) / 7); setFirst(addDays(first, -7 * n)); setCount((c) => c + n); return; }
+    if (w > addDays(first, (count - 1) * 7)) { pending.current = w; setCount(Math.ceil(daysBetween(first, w) / 7) + 2); return; }
+    document.getElementById('wk-' + w)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  useEffect(() => {
+    const w = pending.current;
+    if (w && document.getElementById('wk-' + w)) { pending.current = null; document.getElementById('wk-' + w)!.scrollIntoView({ block: 'start' }); }
+  });
+  /** The week at the top of the screen right now */
+  const visibleWeek = () => {
+    for (const w of weeks) { const el = document.getElementById('wk-' + w); if (el && el.getBoundingClientRect().bottom > 140) return w; }
+    return weeks[0];
+  };
+
   return (
     <div className="page wide">
-      <QuickAdd store={store} defaultDay={start <= td && td <= days[6] ? td : start} />
+      <QuickAdd store={store} defaultDay={td} />
       <section className="card">
         <div className="section-head">
-          <h2>{fmtShort(start)} – {fmtShort(days[6])}</h2>
+          <h2>Calendar</h2>
           <div className="actions">
-            <button className="icon-btn" aria-label="Previous week" onClick={() => setStart(addDays(start, -7))}><Icon name="left" /></button>
-            <button className="soft sm" onClick={() => setStart(startOfWeek(td))}>This week</button>
-            <button className="icon-btn" aria-label="Next week" onClick={() => setStart(addDays(start, 7))}><Icon name="right" /></button>
+            <button className="icon-btn" aria-label="Previous week" onClick={() => scrollToWeek(addDays(visibleWeek(), -7))}><Icon name="left" /></button>
+            <button className="soft sm" onClick={() => scrollToWeek(thisWeek)}>This week</button>
+            <button className="icon-btn" aria-label="Next week" onClick={() => scrollToWeek(addDays(visibleWeek(), 7))}><Icon name="right" /></button>
+            <label className="pill jump" title="Jump to a date">
+              <input type="date" aria-label="Jump to date" onChange={(e) => e.target.value && scrollToWeek(startOfWeek(e.target.value))} />
+            </label>
           </div>
         </div>
-        <FilterBar store={store} filter={filter} setFilter={setFilter} shown={shown} total={weekTasks.length} />
-        <div className="cal">
-          {days.map((day) => <DayColumn key={day} store={store} day={day} drag={drag} goTo={goTo} filter={filter} />)}
-        </div>
-        {isFiltered(filter) && shown === 0 && <p className="empty">Nothing this week matches your filters.</p>}
+        <FilterBar store={store} filter={filter} setFilter={setFilter} shown={shown} total={loadedTasks.length} />
+        <button className="soft sm earlier" onClick={() => addEarlier()}><Icon name="arrowUp" size={14} /> Show earlier weeks</button>
+        {weeks.map((w) => {
+          const end = addDays(w, 6);
+          const has = loadedTasks.some((t) => { const d = t.due ?? ymd(new Date(t.remindAt!)); return d >= w && d <= end && matchTask(filter, t); });
+          return (
+            <div className="cal-week" id={'wk-' + w} key={w}>
+              <div className="week-head">
+                <b>{fmtShort(w)} – {fmtShort(end)}</b>
+                {w === thisWeek ? <span className="week-tag">This week</span> : w < thisWeek ? <span className="muted small">past</span> : null}
+                {isFiltered(filter) && !has && <span className="muted small">nothing matches</span>}
+              </div>
+              <div className="cal">
+                {Array.from({ length: 7 }, (_, i) => addDays(w, i)).map((day) => <DayColumn key={day} store={store} day={day} drag={drag} goTo={goTo} filter={filter} />)}
+              </div>
+            </div>
+          );
+        })}
+        <div ref={bottom} className="cal-more">{count < 160 ? 'Loading more weeks…' : 'That’s three years ahead. Use the date jump to go further.'}</div>
       </section>
       {undated.length > 0 && (
         <section className="card">
@@ -245,7 +301,7 @@ function FilterBar({ store, filter: f, setFilter, shown, total }: { store: Store
           <Icon name="repeat" size={14} />Repeating
         </button>
         {isFiltered(f) && <button type="button" className="soft sm" onClick={() => setFilter(NO_FILTER)}><Icon name="x" size={14} />Clear filters</button>}
-        <span className="muted small filter-count">{isFiltered(f) ? `Showing ${shown} of ${total}` : `${total} this week`}</span>
+        <span className="muted small filter-count">{isFiltered(f) ? `Showing ${shown} of ${total} loaded` : `${total} tasks loaded`}</span>
       </div>
       <div className="pills" role="group" aria-label="Type">
         <span className="label">Type</span>

@@ -414,3 +414,15 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; }
 .crash { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .8rem; background: var(--exb); color: var(--exi); border-radius: var(--r-sm); padding: 10px 12px; margin: 0; }
 .desk-banner { position: sticky; top: 0; z-index: 50; display: flex; flex-wrap: wrap; align-items: center; gap: .4em .8em; padding: .8em 1em; background: var(--ink); color: var(--card); line-height: 1.35; }
 .desk-banner > span { flex: 1 1 60%; }
+.late-badge { font-size: .78rem; font-weight: 700; color: var(--exi); background: var(--exb); border-radius: 99px; padding: 2px 10px; }
+.routines .row .btns { flex-wrap: wrap; justify-content: flex-end; }
+/* ---------- scrollable calendar ---------- */
+.cal-week { display: flex; flex-direction: column; gap: 8px; scroll-margin-top: 12px; }
+.cal-week + .cal-week { margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--rule); }
+.week-head { position: sticky; top: 0; z-index: 4; display: flex; align-items: center; gap: 10px; padding: 8px 2px; background: var(--card); font-family: var(--f-display); }
+.week-head b { font-size: 1.05rem; }
+.week-tag { font-family: var(--f-body); font-size: .72rem; font-weight: 700; color: var(--accent-strong); background: var(--accent-soft); border-radius: 99px; padding: 1px 9px; }
+.cal-more { text-align: center; color: var(--muted); font-size: .85rem; padding: 14px 0 4px; }
+.earlier { align-self: center; }
+.pill.jump input[type="date"] { width: 1.6em; color: transparent; }
+.pill.jump input[type="date"]::-webkit-calendar-picker-indicator { margin: 0; cursor: pointer; }
