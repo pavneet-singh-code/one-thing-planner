@@ -25,6 +25,7 @@ alter table tasks add column if not exists notes text not null default '';
 alter table tasks add column if not exists kind text not null default 'study';   -- study | exam | placement | deadline
 alter table tasks add column if not exists link text not null default '';
 alter table tasks add column if not exists repeat text not null default '';      -- '' | daily | weekdays | weekly
+alter table tasks add column if not exists folder text not null default '';      -- a plan/folder inside the subject, e.g. "Viva"
 
 create table if not exists subjects (
   id          text primary key,

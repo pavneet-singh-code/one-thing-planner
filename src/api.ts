@@ -9,6 +9,7 @@ export interface Task {
   id: string;
   title: string;
   subject: string;
+  folder: string;
   notes: string;
   kind: Kind;
   link: string;
@@ -61,8 +62,8 @@ export const api = {
   subscribe: (subscription: PushSubscriptionJSON) => call('POST', '/push/subscribe', { subscription }),
   unsubscribe: (endpoint: string) => call('POST', '/push/unsubscribe', { endpoint }),
   testPush: () => call<{ sent: number; devices: number }>('POST', '/push/test'),
-  planGoal: (b: { goal: string; deadline: string; hoursPerDay: number; today: string }) =>
-    call<{ summary: string; rules?: string[]; tasks: { title: string; date: string; minutes: number; kind?: string }[] }>('POST', '/ai/plan-goal', b),
+  planGoal: (b: { goal: string; deadline: string; hoursPerDay: number; today: string; pdf?: string }) =>
+    call<{ summary: string; rules?: string[]; docNotes?: string; tasks: { title: string; date: string; minutes: number; kind?: string }[] }>('POST', '/ai/plan-goal', b),
   refinePlan: (b: { instruction: string; tasks: { title: string; date: string; minutes: number; kind: string }[]; today: string; deadline: string | null; hoursPerDay: number | null; context: string; history: string[] }) =>
     call<{ summary: string; rules?: string[]; tasks: { title: string; date: string; minutes: number; kind?: string }[] }>('POST', '/ai/refine-plan', b),
   planDay: (b: { hours: number; today: string }) => call<{ pick: { id: string; why: string }[]; advice: string }>('POST', '/ai/plan-day', b),
@@ -81,7 +82,7 @@ const txt = (v: unknown) => (typeof v === 'string' ? v : '');
 function normalizeState(s: AppState): AppState {
   const tasks = arr<Task>(s?.tasks).filter((t) => t && typeof t.id === 'string').map((t) => ({
     ...t,
-    title: txt(t.title) || '(untitled)', subject: txt(t.subject), notes: txt(t.notes), link: txt(t.link),
+    title: txt(t.title) || '(untitled)', subject: txt(t.subject), folder: txt(t.folder), notes: txt(t.notes), link: txt(t.link),
     kind: (['study', 'exam', 'placement', 'deadline'].includes(t.kind) ? t.kind : 'study') as Kind,
     repeat: (typeof t.repeat === 'string' ? t.repeat : '') as Repeat,
     status: (['later', 'today', 'done'].includes(t.status) ? t.status : 'later') as Status,

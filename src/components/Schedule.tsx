@@ -241,7 +241,7 @@ function matchTask(f: Filter, t: Task) {
   if (f.status === 'done' && t.status !== 'done') return false;
   if (f.repeating && !t.repeat) return false;
   const q = f.q.trim().toLowerCase();
-  if (q && !`${t.title} ${t.notes} ${t.subject}`.toLowerCase().includes(q)) return false;
+  if (q && !`${t.title} ${t.notes} ${t.subject} ${t.folder}`.toLowerCase().includes(q)) return false;
   return true;
 }
 function matchMark(f: Filter, s: Subject) {

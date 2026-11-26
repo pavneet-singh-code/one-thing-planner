@@ -61,7 +61,7 @@ const steps = (v: unknown) => {
   return v.slice(0, 12).map((s) => ({ text: String((s as { text?: unknown })?.text ?? '').slice(0, 160), done: Boolean((s as { done?: unknown })?.done) }));
 };
 
-const TASK_COLS = `id, title, subject, notes, kind, link, repeat, due, remind_at as "remindAt", est, status, ord, steps, reminded,
+const TASK_COLS = `id, title, subject, folder, notes, kind, link, repeat, due, remind_at as "remindAt", est, status, ord, steps, reminded,
   created_at as "createdAt", done_at as "doneAt"`;
 
 /* ---------- errors ---------- */
@@ -117,12 +117,12 @@ app.post('/tasks', async (c) => {
     if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new BadRequest('id has invalid characters');
     const status = STATUSES.has(raw.status as string) ? raw.status : 'later';
     const [row] = await d.q(
-      `insert into tasks (id, title, subject, due, remind_at, est, status, ord, notes, kind, link, repeat)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+      `insert into tasks (id, title, subject, due, remind_at, est, status, ord, notes, kind, link, repeat, folder)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
        on conflict (id) do nothing
        returning ${TASK_COLS}`,
       [id, str(raw.title, 140, 'title', true), str(raw.subject, 40, 'subject'), dateStr(raw.due, 'due'),
-       isoTime(raw.remindAt, 'remindAt'), int(raw.est, 5, 600, 30), status, Number(raw.ord) || 0, str(raw.notes, 2000, 'notes'), kind(raw.kind), link(raw.link), repeat(raw.repeat)]);
+       isoTime(raw.remindAt, 'remindAt'), int(raw.est, 5, 600, 30), status, Number(raw.ord) || 0, str(raw.notes, 2000, 'notes'), kind(raw.kind), link(raw.link), repeat(raw.repeat), str(raw.folder, 60, 'folder')]);
     if (row) out.push(row);
   }
   return c.json({ tasks: out }, 201);
@@ -136,6 +136,7 @@ app.patch('/tasks/:id', async (c) => {
   if ('title' in b) set('title', str(b.title, 140, 'title', true));
   if ('subject' in b) set('subject', str(b.subject, 40, 'subject'));
   if ('notes' in b) set('notes', str(b.notes, 2000, 'notes'));
+  if ('folder' in b) set('folder', str(b.folder, 60, 'folder'));
   if ('kind' in b) set('kind', kind(b.kind));
   if ('link' in b) set('link', link(b.link));
   if ('repeat' in b) set('repeat', repeat(b.repeat));
@@ -241,7 +242,11 @@ app.post('/push/test', async (c) => {
 app.post('/ai/plan-goal', async (c) => {
   const b = await c.req.json<Record<string, unknown>>();
   const today = dateStr(b.today, 'today') ?? new Date().toISOString().slice(0, 10);
+  const pdf = typeof b.pdf === 'string' ? b.pdf : '';
+  if (pdf.length > 4_300_000) throw new BadRequest('That PDF is too big. Use one under 3 MB.');
+  if (pdf && !/^[A-Za-z0-9+/=]+$/.test(pdf.slice(0, 200))) throw new BadRequest('pdf must be base64');
   return c.json(await planGoal({
+    pdf,
     goal: str(b.goal, 1500, 'goal', true),
     deadline: dateStr(b.deadline, 'deadline') ?? today,
     hoursPerDay: Math.min(12, Math.max(0.5, Number(b.hoursPerDay) || 2)),

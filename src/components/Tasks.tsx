@@ -18,6 +18,7 @@ export function Chips({ t }: { t: Task }) {
     <div className="meta">
       {t.kind && t.kind !== 'study' && <span className={'tag k-' + t.kind}>{kindLabel(t.kind)}</span>}
       {t.subject && <span className={'tag ' + subjectClass(t.subject)}>{t.subject}</span>}
+      {t.folder && <span className="folder-chip"><Icon name="folder" size={12} />{t.folder}</span>}
       {t.due && (
         <span className={'chip' + (t.status !== 'done' && t.due < td ? ' due-over' : t.due === td ? ' due-today' : '')}>
           <Icon name="calendar" size={13} />
@@ -242,34 +243,122 @@ export function Activity({ store }: { store: Store }) {
   );
 }
 
+/* ---------- folders ---------- */
+type FolderSel = { subject: string; folder: string } | { batch: string[]; label: string } | null;
+
+/** Tasks added in one go (an AI plan) but never given a folder: same subject, created within a few seconds. */
+export function unsortedBatches(tasks: Task[]) {
+  const loose = tasks.filter((t) => !t.folder).sort((a, b) => a.subject.localeCompare(b.subject) || a.createdAt.localeCompare(b.createdAt));
+  const out: { subject: string; at: string; ids: string[]; first: string }[] = [];
+  for (const t of loose) {
+    const last = out.at(-1);
+    const near = last && last.subject === t.subject && Math.abs(new Date(t.createdAt).getTime() - new Date(last.at).getTime()) < 15_000;
+    if (near) { last.ids.push(t.id); last.at = t.createdAt; } else out.push({ subject: t.subject, at: t.createdAt, ids: [t.id], first: t.title });
+  }
+  return out.filter((b) => b.ids.length >= 3);
+}
+
+function FoldersCard({ store, subj, sel, setSel }: { store: Store; subj: string; sel: FolderSel; setSel: (s: FolderSel) => void }) {
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [name, setName] = useState('');
+  const groups = new Map<string, Task[]>();
+  for (const t of store.tasks) {
+    if (!t.folder || (subj && t.subject !== subj)) continue;
+    const k = t.subject + '\u0000' + t.folder;
+    groups.set(k, [...(groups.get(k) ?? []), t]);
+  }
+  const folders = [...groups.entries()].map(([k, ts]) => {
+    const [subject, folder] = k.split('\u0000');
+    const done = ts.filter((t) => t.status === 'done').length;
+    const next = ts.filter((t) => t.status !== 'done').sort((a, b) => (a.due ?? '9999').localeCompare(b.due ?? '9999'))[0];
+    return { k, subject, folder, total: ts.length, done, next };
+  }).sort((a, b) => a.subject.localeCompare(b.subject) || a.folder.localeCompare(b.folder));
+  const batches = unsortedBatches(store.tasks).filter((b) => !subj || b.subject === subj);
+  if (!folders.length && !batches.length) return null;
+  const isSel = (f: { subject: string; folder: string }) => !!sel && 'folder' in sel && sel.subject === f.subject && sel.folder === f.folder;
+
+  return (
+    <section className="card">
+      <div className="section-head">
+        <h2><Icon name="folder" /> Folders</h2>
+        {sel && <button className="soft sm" onClick={() => setSel(null)}><Icon name="x" size={14} /> Show all tasks</button>}
+      </div>
+      {batches.length > 0 && (
+        <div className="unsorted">
+          <span className="label">Unsorted plans · tasks you added together. Give each one a name.</span>
+          {batches.map((b) => {
+            const key = b.ids[0];
+            const label = `${b.subject || 'No subject'} · added ${new Date(b.at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}`;
+            const selected = !!sel && 'batch' in sel && sel.batch[0] === key;
+            return (
+              <div className={'folder-row unsorted-row' + (selected ? ' on' : '')} key={key}>
+                <button className="folder-main" onClick={() => setSel(selected ? null : { batch: b.ids, label })}>
+                  <b>{label}</b>
+                  <span className="muted small">{b.ids.length} tasks · starts with “{b.first}”</span>
+                </button>
+                {renaming === key ? (
+                  <form className="inline-name" onSubmit={(e) => { e.preventDefault(); if (name.trim()) { store.actions.setFolder(b.ids, name); toast(`Moved ${b.ids.length} tasks to “${name.trim()}”.`); setRenaming(null); setSel({ subject: b.subject, folder: name.trim() }); } }}>
+                    <input autoFocus maxLength={60} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Viva or Exam" aria-label="Folder name" />
+                    <button className="primary sm" type="submit" disabled={!name.trim()}>Save</button>
+                  </form>
+                ) : <button className="soft sm" onClick={() => { setRenaming(key); setName(''); }}>Name it</button>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <div className="folder-list">
+        {folders.map((f) => (
+          <div className={'folder-row ' + subjectClass(f.subject) + (isSel(f) ? ' on' : '')} key={f.k}>
+            <button className="folder-main" onClick={() => setSel(isSel(f) ? null : { subject: f.subject, folder: f.folder })}>
+              <span className="folder-name"><Icon name="folder" size={16} /><span className="muted">{f.subject || 'No subject'} ›</span> <b>{f.folder}</b></span>
+              <div className="track"><div style={{ width: `${(f.done / f.total) * 100}%` }} /></div>
+              <span className="muted small">{f.done}/{f.total} done{f.next ? ` · next: ${f.next.title}` : ''}</span>
+            </button>
+            {renaming === f.k ? (
+              <form className="inline-name" onSubmit={(e) => { e.preventDefault(); if (name.trim()) { store.actions.renameFolder(f.subject, f.folder, name); setRenaming(null); if (isSel(f)) setSel({ subject: f.subject, folder: name.trim() }); } }}>
+                <input autoFocus maxLength={60} value={name} onChange={(e) => setName(e.target.value)} aria-label="New folder name" />
+                <button className="primary sm" type="submit" disabled={!name.trim()}>Save</button>
+              </form>
+            ) : <button className="icon-btn" aria-label={`Rename folder ${f.folder}`} title="Rename" onClick={() => { setRenaming(f.k); setName(f.folder); }}><Icon name="edit" size={16} /></button>}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 /* ---------- Tasks page ---------- */
 export function TasksPanel({ store }: { store: Store }) {
   const { todays, laters, dones, actions } = store;
   const edit = useEditor();
   const [q, setQ] = useState('');
   const [subj, setSubj] = useState('');
+  const [sel, setSel] = useState<FolderSel>(null);
   const subjects = useMemo(() => [...new Set(store.tasks.map((t) => t.subject).filter(Boolean))].sort(), [store.tasks]);
-  const match = (t: Task) => (!subj || t.subject === subj) && (!q || (t.title + ' ' + t.notes).toLowerCase().includes(q.toLowerCase()));
+  const inSel = (t: Task) => !sel || ('batch' in sel ? sel.batch.includes(t.id) : t.subject === sel.subject && t.folder === sel.folder);
+  const match = (t: Task) => inSel(t) && (!subj || t.subject === subj) && (!q || (t.title + ' ' + t.notes + ' ' + t.folder).toLowerCase().includes(q.toLowerCase()));
 
   const lt = laters.filter(match), tt = todays.filter(match), dt = dones.filter(match);
   const progress = subjects.map((s) => {
     const all = store.tasks.filter((t) => t.subject === s);
     return { s, done: all.filter((t) => t.status === 'done').length, total: all.length };
   });
+  const selLabel = sel ? ('batch' in sel ? sel.label : `${sel.subject || 'No subject'} › ${sel.folder}`) : '';
 
   return (
     <div className="page">
       <div className="toolbar">
-        <label className="search"><Icon name="search" /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search tasks and notes" aria-label="Search tasks" /></label>
-        <button className="primary" onClick={() => edit({ preset: {} })}><Icon name="plus" size={16} /> New task</button>
+        <label className="search"><Icon name="search" /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search tasks, notes, folders" aria-label="Search tasks" /></label>
+        <button className="primary" onClick={() => edit({ preset: sel && 'folder' in sel ? { subject: sel.subject, folder: sel.folder } : subj ? { subject: subj } : {} })}><Icon name="plus" size={16} /> New task</button>
       </div>
       {subjects.length > 0 && (
         <div className="pills">
-          <button className={'pill' + (!subj ? ' on' : '')} onClick={() => setSubj('')}>All</button>
-          {subjects.map((s) => <button key={s} className={'pill ' + (subj === s ? 'on' : '')} onClick={() => setSubj(subj === s ? '' : s)}><i className={'dot ' + subjectClass(s)} />{s}</button>)}
+          <button className={'pill' + (!subj ? ' on' : '')} onClick={() => { setSubj(''); setSel(null); }}>All</button>
+          {subjects.map((s) => <button key={s} className={'pill ' + (subj === s ? 'on' : '')} onClick={() => { setSubj(subj === s ? '' : s); setSel(null); }}><i className={'dot ' + subjectClass(s)} />{s}</button>)}
         </div>
       )}
-      {progress.length > 0 && !q && (
+      {progress.length > 0 && !q && !sel && (
         <div className="progress-grid">
           {progress.filter((p) => !subj || p.s === subj).map((p) => (
             <div className={'progress ' + subjectClass(p.s)} key={p.s}>
@@ -280,7 +369,10 @@ export function TasksPanel({ store }: { store: Store }) {
         </div>
       )}
 
-      <Routines store={store} />
+      <FoldersCard store={store} subj={subj} sel={sel} setSel={setSel} />
+      {sel && <p className="sel-banner"><Icon name="folder" size={16} /> Showing <b>{selLabel}</b> <button className="soft sm" onClick={() => setSel(null)}>Show all</button></p>}
+
+      {!sel && <Routines store={store} />}
 
       <section className="card">
         <div className="section-head"><h2>Today</h2><span className="muted small">{todays.length}/{TODAY_LIMIT}</span></div>
@@ -291,15 +383,15 @@ export function TasksPanel({ store }: { store: Store }) {
       </section>
 
       <section className="card">
-        <div className="section-head"><h2>Later</h2><span className="muted small">{laters.length} parked</span></div>
+        <div className="section-head"><h2>Later</h2><span className="muted small">{sel ? `${lt.length} in this folder` : `${laters.length} parked`}</span></div>
         <div className="list">
           {lt.length ? lt.map((t) => <TaskRow key={t.id} t={t} store={store} extra={<button className="soft sm" onClick={() => actions.moveToday(t)}>Today</button>} />)
             : <p className="empty">{laters.length ? 'No matches.' : 'Nothing parked. New tasks land here.'}</p>}
         </div>
       </section>
 
-      <details className="card">
-        <summary><h2 style={{ display: 'inline' }}>Done</h2> <span className="muted small">({dones.length}) · tap Revise to schedule a revision</span></summary>
+      <details className="card" open={!!sel}>
+        <summary><h2 style={{ display: 'inline' }}>Done</h2> <span className="muted small">({dt.length}) · tap Revise to schedule a revision</span></summary>
         <div className="list" style={{ marginTop: 10 }}>
           {dt.slice(0, 80).map((t) => <TaskRow key={t.id} t={t} store={store} extra={<RevisePicker t={t} store={store} />} />)}
           {!dt.length && <p className="empty">Nothing finished yet.</p>}

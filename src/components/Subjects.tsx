@@ -251,7 +251,20 @@ function SubjectSheet({ store, subject, onClose }: { store: Store; subject: Subj
         {!isNew && tasks.length > 0 && (
           <section className="box">
             <div className="section-head"><h3>Tasks</h3><span className="muted small">{tasks.filter((t) => t.status === 'done').length}/{tasks.length} done</span></div>
-            <div className="list">{tasks.slice(0, 40).map((t) => <TaskRow key={t.id} t={t} store={store} />)}</div>
+            {[...new Set(tasks.map((t) => t.folder))].sort((x, y) => (x ? 0 : 1) - (y ? 0 : 1) || x.localeCompare(y)).map((f) => {
+              const ts = tasks.filter((t) => t.folder === f);
+              const done = ts.filter((t) => t.status === 'done').length;
+              return (
+                <details className="folder-group" key={f || '(none)'} open={!f || ts.length <= 6}>
+                  <summary>
+                    <span className="folder-name"><Icon name="folder" size={15} /><b>{f || 'No folder'}</b></span>
+                    <span className="muted small">{done}/{ts.length}</span>
+                    <div className="track"><div style={{ width: `${(done / ts.length) * 100}%` }} /></div>
+                  </summary>
+                  <div className="list">{ts.slice(0, 60).map((t) => <TaskRow key={t.id} t={t} store={store} />)}</div>
+                </details>
+              );
+            })}
           </section>
         )}
 

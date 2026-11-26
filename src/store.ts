@@ -69,7 +69,7 @@ export function useStore() {
       return { tasks, todays, maxOrd: Math.max(0, ...todays.map((t) => t.ord)), minOrd: Math.min(0, ...todays.map((t) => t.ord)) };
     };
     const a = {
-      async add(items: { title: string; subject?: string; notes?: string; kind?: Kind; link?: string; repeat?: Repeat; due?: string | null; remindAt?: string | null; est?: number; wantToday?: boolean }[]) {
+      async add(items: { title: string; subject?: string; folder?: string; notes?: string; kind?: Kind; link?: string; repeat?: Repeat; due?: string | null; remindAt?: string | null; est?: number; wantToday?: boolean }[]) {
         const { todays, maxOrd } = cur();
         let free = TODAY_LIMIT - todays.length;
         const now = new Date().toISOString();
@@ -77,7 +77,7 @@ export function useStore() {
           const toToday = x.wantToday && free > 0;
           if (toToday) free--;
           return {
-            id: newId() + i, title: x.title, subject: x.subject ?? '', notes: x.notes ?? '', kind: x.kind ?? 'study', link: x.link ?? '', repeat: x.repeat ?? '', due: x.due || null, remindAt: x.remindAt || null,
+            id: newId() + i, title: x.title, subject: x.subject ?? '', folder: x.folder ?? '', notes: x.notes ?? '', kind: x.kind ?? 'study', link: x.link ?? '', repeat: x.repeat ?? '', due: x.due || null, remindAt: x.remindAt || null,
             est: x.est ?? 30, status: toToday ? 'today' : 'later', ord: toToday ? maxOrd + 1 + i : 0,
             steps: [], reminded: false, createdAt: now, doneAt: null,
           };
@@ -111,7 +111,7 @@ export function useStore() {
           const due = nextRepeat(t.due ?? today(), t.repeat);
           const shift = t.due ? (new Date(due + 'T12:00').getTime() - new Date(t.due + 'T12:00').getTime()) : 0;
           const remindAt = t.remindAt ? new Date(new Date(t.remindAt).getTime() + (shift || 86400000)).toISOString() : null;
-          a.add([{ title: t.title, subject: t.subject, notes: t.notes, kind: t.kind, link: t.link, repeat: t.repeat, est: t.est, due, remindAt }])
+          a.add([{ title: t.title, subject: t.subject, folder: t.folder, notes: t.notes, kind: t.kind, link: t.link, repeat: t.repeat, est: t.est, due, remindAt }])
             .then(([n]) => { if (t.steps.length) patch(n.id, { steps: t.steps.map((s) => ({ ...s, done: false })) }); });
           const left = pendingDays(due, t.repeat);
           const when = new Date(due + 'T12:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
@@ -123,6 +123,15 @@ export function useStore() {
         if (!t.repeat || !t.due) return;
         const day = latestRepeat(t.due, t.repeat);
         if (day !== t.due) { a.moveToDay(t, day); toast('Skipped the missed days.'); }
+      },
+      /** Put several tasks into one folder (e.g. name an unsorted AI plan "Viva"). */
+      setFolder(ids: string[], folder: string) {
+        for (const id of ids) patch(id, { folder: folder.trim().slice(0, 60) });
+      },
+      /** Rename a folder inside a subject (all its tasks follow). */
+      renameFolder(subject: string, from: string, to: string) {
+        const ids = (stateRef.current?.tasks ?? []).filter((t) => t.subject === subject && t.folder === from).map((t) => t.id);
+        a.setFolder(ids, to);
       },
       /** Move a task to another day; its reminder moves by the same number of days. */
       moveToDay(t: Task, day: string) {
@@ -144,7 +153,7 @@ export function useStore() {
         const base = t.title.replace(/^Revise( \(\d\/\d\))?: /, '');
         await a.add(offsets.map((o, i) => ({
           title: `Revise${offsets.length > 1 ? ` (${i + 1}/${offsets.length})` : ''}: ${base}`.slice(0, 140),
-          subject: t.subject, notes: t.notes, est: Math.min(30, Math.max(10, Math.round(t.est / 2))),
+          subject: t.subject, folder: t.folder, notes: t.notes, est: Math.min(30, Math.max(10, Math.round(t.est / 2))),
           due: addDays(td, o), remindAt: new Date(addDays(td, o) + 'T17:00').toISOString(),
         })));
         toast(offsets.length > 1 ? `${offsets.length} revisions scheduled.` : 'Revision scheduled.');
@@ -168,7 +177,7 @@ export function useStore() {
         try { await api.deleteTask(t.id); } catch (e) { fail(e); }
       },
       setSteps: (t: Task, steps: Task['steps']) => patch(t.id, { steps }),
-      edit(t: Task, p: Partial<Pick<Task, 'title' | 'subject' | 'notes' | 'due' | 'est' | 'remindAt' | 'steps' | 'kind' | 'link' | 'repeat'>>) {
+      edit(t: Task, p: Partial<Pick<Task, 'title' | 'subject' | 'folder' | 'notes' | 'due' | 'est' | 'remindAt' | 'steps' | 'kind' | 'link' | 'repeat'>>) {
         const changed = Object.fromEntries(Object.entries(p).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(t[k as keyof Task])));
         if (!Object.keys(changed).length) return;
         if ('remindAt' in changed) (changed as Partial<Task>).reminded = false;

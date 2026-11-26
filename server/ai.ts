@@ -76,14 +76,14 @@ function normTasks(raw: PlannedTask[] | undefined, max: number) {
       kind: KINDS.has(t.kind ?? '') ? t.kind! : 'study',
     }));
 }
-export async function planGoal(p: { goal: string; deadline: string; hoursPerDay: number; today: string }) {
+export async function planGoal(p: { goal: string; deadline: string; hoursPerDay: number; today: string; pdf?: string }) {
   const prompt = `${COACH}
 Today is ${p.today} (${weekdayOf(p.today)}). Deadline: ${p.deadline} (${weekdayOf(p.deadline)}). Default time budget: about ${p.hoursPerDay} hours per day.
 Goal, in the student's own words (between the markers). Anything they say about timing, breaks, days off or how to group work OVERRIDES the default time budget:
 <<<
 ${p.goal}
 >>>
-${calendar(p.today, p.deadline)}
+${p.pdf ? 'A PDF is attached (a syllabus, brief, notes or similar). Base the tasks on what is actually in it: name its units, chapters, questions or requirements in the task titles.\n' : ''}${calendar(p.today, p.deadline)}
 Make a plan:
 - Each task fits one sitting (15-90 minutes), starts with a verb, and says exactly what to do (which chapter, how many problems, which tool to try...). Under 90 characters. Be specific to this goal, not generic.
 - Use only dates from the calendar above, on or before the deadline. Several tasks may share a day and some days can be empty.
@@ -91,15 +91,16 @@ Make a plan:
 - Include a review / practice-test (or for projects, a check-in or demo) task near the end. At most 30 tasks.
 - ${KIND_RULE}
 - Fill "rules" first: the concrete scheduling rules you followed, in short phrases (e.g. "Finish by Nov 30", "About 30 min a day").
-- "summary" is one sentence on the strategy.`;
-  const r = await askJson<{ rules?: string[]; summary?: string; tasks?: PlannedTask[] }>(prompt, {
+- "summary" is one sentence on the strategy.${p.pdf ? '\n- "docNotes": the key contents of the PDF the plan relies on (units/topics/requirements, dates), as a compact list under 1200 characters. It will be reused when the student asks for changes.' : ''}`;
+  const parts: Part[] = p.pdf ? [{ inlineData: { mimeType: 'application/pdf', data: p.pdf } }, { text: prompt }] : [{ text: prompt }];
+  const r = await askJson<{ rules?: string[]; summary?: string; docNotes?: string; tasks?: PlannedTask[] }>(parts, {
     type: 'object',
-    properties: { rules: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' }, tasks: TASKS_SCHEMA },
+    properties: { rules: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' }, tasks: TASKS_SCHEMA, ...(p.pdf ? { docNotes: { type: 'string' } } : {}) },
     required: ['rules', 'summary', 'tasks'],
   });
   const tasks = normTasks(r.tasks, 30);
   if (!tasks.length) throw new AiError('Gemini did not suggest any tasks. Try describing the goal in more detail.');
-  return { summary: String(r.summary ?? ''), rules: cleanRules(r.rules), tasks };
+  return { summary: String(r.summary ?? ''), rules: cleanRules(r.rules), docNotes: String(r.docNotes ?? '').slice(0, 1500), tasks };
 }
 
 export async function readSyllabus(p: { pdf: string; text: string; subject: string; kind: string; examDate: string | null; hoursPerDay: number; today: string; plan: boolean }) {

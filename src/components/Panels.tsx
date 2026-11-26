@@ -14,9 +14,12 @@ export function AiPanel({ store }: { store: Store }) {
   const [deadline, setDeadline] = useState(addDays(today(), 7));
   const [hours, setHours] = useState(2);
   const [subject, setSubject] = useState('');
+  const [folder, setFolder] = useState('');
+  const [pdf, setPdf] = useState<{ name: string; data: string } | null>(null);
+  const [docNotes, setDocNotes] = useState('');
   const [plan, setPlan] = useState<Plan | null>(null);
   const [busyGoal, setBusyGoal] = useState(false);
-  const [justAdded, setJustAdded] = useState<{ n: number; subject: string } | null>(null);
+  const [justAdded, setJustAdded] = useState<{ n: number; subject: string; folder: string } | null>(null);
 
   const [adjSubject, setAdjSubject] = useState('');
   const [adj, setAdj] = useState<Plan | null>(null);
@@ -33,12 +36,25 @@ export function AiPanel({ store }: { store: Store }) {
 
   const subjects = [...new Set([...store.subjects.map((s) => s.name), ...store.tasks.map((t) => t.subject)].filter(Boolean))].sort();
 
+  const pickPdf = (f: File | undefined) => {
+    if (!f) return;
+    if (f.type !== 'application/pdf' && !f.name.toLowerCase().endsWith('.pdf')) { toast('Pick a PDF file.'); return; }
+    if (f.size > 3 * 1024 * 1024) { toast('That PDF is over 3 MB. Use just the pages you need.'); return; }
+    const rd = new FileReader();
+    rd.onload = () => setPdf({ name: f.name, data: String(rd.result).split(',')[1] ?? '' });
+    rd.onerror = () => toast('Could not read that file.');
+    rd.readAsDataURL(f);
+  };
+  // every AI plan goes into a folder so two plans for one subject never get mixed up
+  const planFolder = () => folder.trim() || `Plan ${new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`;
+
   const makePlan = async () => {
     if (!goal.trim()) return;
-    setBusyGoal(true); setPlan(null); setJustAdded(null);
+    setBusyGoal(true); setPlan(null); setJustAdded(null); setDocNotes('');
     try {
-      const r = await api.planGoal({ goal, deadline, hoursPerDay: hours, today: today() });
-      setPlan({ summary: r.summary, rules: r.rules, tasks: fromAi(r.tasks, { subject: subject.trim(), time: '17:00' }) });
+      const r = await api.planGoal({ goal, deadline, hoursPerDay: hours, today: today(), pdf: pdf?.data });
+      setDocNotes(r.docNotes ?? '');
+      setPlan({ summary: r.summary, rules: r.rules, tasks: fromAi(r.tasks, { subject: subject.trim(), folder: planFolder(), time: '17:00' }) });
     } catch (e) { toast((e as Error).message); }
     finally { setBusyGoal(false); }
   };
@@ -53,20 +69,21 @@ export function AiPanel({ store }: { store: Store }) {
         await store.actions.saveSubject({ id: newId(), name, kind: 'project', examDate: deadline || null, topics: [], fileName: '' }).catch(() => {});
       }
     }
-    setJustAdded({ n: kept.length, subject: kept.find((t) => t.subject)?.subject ?? '' });
-    setPlan(null); setGoal('');
+    setJustAdded({ n: kept.length, subject: kept.find((t) => t.subject)?.subject ?? '', folder: kept.find((t) => t.folder)?.folder ?? '' });
+    setPlan(null); setGoal(''); setFolder(''); setPdf(null);
     toast(`Added ${kept.length} tasks.`);
   };
 
   /* adjust tasks that already exist */
-  const loadAdjust = (subj: string) => {
+  const loadAdjust = (sel: string) => {
     const td = today();
+    const [subj, fold] = sel.split('\u0000');
     const list = store.tasks
-      .filter((t) => t.status !== 'done' && (!subj || t.subject === subj) && (!t.due || t.due >= td))
+      .filter((t) => t.status !== 'done' && (!subj || t.subject === subj) && (fold === undefined || t.folder === fold) && (!t.due || t.due >= td))
       .sort((a, b) => (a.due ?? '9999').localeCompare(b.due ?? '9999'))
       .slice(0, 50);
-    if (!list.length) { toast(subj ? `No open upcoming tasks for ${subj}.` : 'No open upcoming tasks.'); return; }
-    setAdjSubject(subj);
+    if (!list.length) { toast(subj ? `No open upcoming tasks for ${subj}${fold ? ' › ' + fold : ''}.` : 'No open upcoming tasks.'); return; }
+    setAdjSubject(sel);
     setAdjOriginal(list);
     setAdj({ summary: '', tasks: list.map(fromTask) });
     setTimeout(() => adjRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
@@ -109,13 +126,21 @@ export function AiPanel({ store }: { store: Store }) {
           </label>
           <label className="f">Deadline<input type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} /></label>
           <label className="f">Hours / day<input type="number" min={0.5} max={12} step={0.5} value={hours} onChange={(e) => setHours(Number(e.target.value) || 2)} /></label>
-          <label className="f wide">Subject / project<input maxLength={40} list="aiSubj" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="e.g. NALR or Video editor app" /></label>
+          <label className="f wide">Subject / project<input maxLength={40} list="aiSubj" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="e.g. DNN or Video editor app" /></label>
+          <label className="f wide">Folder for this plan<input maxLength={60} list="aiFolder" value={folder} onChange={(e) => setFolder(e.target.value)} placeholder="e.g. Viva, Exam, Assignment 2" /></label>
           <datalist id="aiSubj">{subjects.map((s) => <option key={s} value={s} />)}</datalist>
+          <datalist id="aiFolder">{[...new Set(store.tasks.filter((t) => t.subject === subject.trim() && t.folder).map((t) => t.folder))].map((s) => <option key={s} value={s} />)}</datalist>
+          <label className={'drop small-drop full' + (pdf ? ' has' : '')}>
+            <input type="file" accept="application/pdf,.pdf" onChange={(e) => pickPdf(e.target.files?.[0])} />
+            <Icon name="upload" size={18} />
+            <span>{pdf ? pdf.name : 'Attach a PDF (syllabus, assignment brief, notes) — optional'}</span>
+            {pdf && <button type="button" className="icon-btn" aria-label="Remove PDF" onClick={(e) => { e.preventDefault(); setPdf(null); }}><Icon name="x" size={16} /></button>}
+          </label>
         </div>
         <div className="actions"><button className="primary" disabled={busyGoal || !goal.trim()} onClick={makePlan}>{busyGoal ? 'Planning…' : plan ? 'Start over' : 'Make a plan'}</button></div>
         {plan && (
           <>
-            <PlanReview plan={plan} setPlan={setPlan} store={store} context={{ text: `${subject ? `Subject: ${subject}. ` : ''}${goal}`, deadline, hoursPerDay: hours }} />
+            <PlanReview plan={plan} setPlan={setPlan} store={store} context={{ text: `${subject ? `Subject: ${subject}. ` : ''}${folder ? `Plan: ${folder}. ` : ''}${goal}${docNotes ? `\nFrom the attached PDF: ${docNotes}` : ''}`.slice(0, 1500), deadline, hoursPerDay: hours }} />
             <div className="actions sticky-actions">
               <button className="primary" disabled={!kept.length} onClick={acceptPlan}>Add {kept.length} tasks</button>
               <button className="soft" onClick={() => setPlan(null)}>Discard</button>
@@ -124,8 +149,8 @@ export function AiPanel({ store }: { store: Store }) {
         )}
         {justAdded && (
           <div className="note-box">
-            <span>Added {justAdded.n} tasks{justAdded.subject ? ` to “${justAdded.subject}” (progress shows on Home and in Subjects)` : ''}. Want to change how they’re spread out?</span>
-            <button className="soft sm" onClick={() => { loadAdjust(justAdded.subject); setJustAdded(null); }}><Icon name="sparkle" size={14} /> Adjust them with AI</button>
+            <span>Added {justAdded.n} tasks to <b>{justAdded.subject || 'No subject'}{justAdded.folder ? ` › ${justAdded.folder}` : ''}</b>. You’ll find them in Tasks under that folder. Want to change how they’re spread out?</span>
+            <button className="soft sm" onClick={() => { loadAdjust(justAdded.subject + (justAdded.folder ? '\u0000' + justAdded.folder : '')); setJustAdded(null); }}><Icon name="sparkle" size={14} /> Adjust them with AI</button>
           </div>
         )}
       </div>
@@ -139,7 +164,10 @@ export function AiPanel({ store }: { store: Store }) {
           <label className="f">Which tasks
             <select value={adjSubject} onChange={(e) => setAdjSubject(e.target.value)}>
               <option value="">All subjects</option>
-              {subjects.map((s) => <option key={s} value={s}>{s}</option>)}
+              {subjects.map((s) => {
+                const fs = [...new Set(store.tasks.filter((t) => t.subject === s && t.folder).map((t) => t.folder))].sort();
+                return [<option key={s} value={s}>{s} (all)</option>, ...fs.map((f) => <option key={s + f} value={s + '\u0000' + f}>{s} › {f}</option>)];
+              })}
             </select>
           </label>
           <button className="soft" onClick={() => loadAdjust(adjSubject)}>{adj ? 'Reload' : 'Load tasks'}</button>
@@ -147,7 +175,7 @@ export function AiPanel({ store }: { store: Store }) {
         {adj && (
           <>
             <PlanReview plan={adj} setPlan={setAdj} store={store}
-              context={{ text: `Re-planning the student's existing ${adjSubject || 'upcoming'} tasks.`, deadline: store.subjects.find((s) => s.name === adjSubject)?.examDate ?? null }} />
+              context={{ text: `Re-planning the student's existing ${adjSubject.replace('\u0000', ' › ') || 'upcoming'} tasks.`, deadline: store.subjects.find((s) => s.name === adjSubject.split('\u0000')[0])?.examDate ?? null }} />
             <div className="actions sticky-actions">
               <button className="primary" onClick={saveAdjust}>Save changes</button>
               <span className="muted small">{adjKept.length - adjNew.length} kept · {adjNew.length} new · {adjRemoved.length} removed</span>
